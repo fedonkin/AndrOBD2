@@ -313,6 +313,12 @@ public class MainActivity extends PluginManager
                 {
                     case MESSAGE_STATE_CHANGE:
                         log.log(Level.FINEST, String.format(Locale.US, "State change: %s", msg));
+                        if (msg.arg2 != 0
+                                && (mCommService == null || System.identityHashCode(mCommService) != msg.arg2))
+                        {
+                            // Ignore late callback from an older, replaced CommService instance
+                            break;
+                        }
                         switch ((CommService.STATE) msg.obj)
                         {
                             case CONNECTED:
@@ -577,7 +583,6 @@ public class MainActivity extends PluginManager
                 }
             });
         }
-        requestWindowFeature(Window.FEATURE_PROGRESS);
 
         applyThemeMode(false);
 
@@ -1189,6 +1194,10 @@ public class MainActivity extends PluginManager
                     {
                         btnClearSearch.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
                     }
+                    if (getListView() != null && getListView().getCheckedItemCount() > 0)
+                    {
+                        getListView().clearChoices();
+                    }
                     mPidAdapter.setSearchQuery(q);
                     refreshDataListStats();
                 }
@@ -1269,6 +1278,10 @@ public class MainActivity extends PluginManager
 
     private void selectPidPreset(PidPresetManager.Preset preset)
     {
+        if (getListView() != null && getListView().getCheckedItemCount() > 0)
+        {
+            getListView().clearChoices();
+        }
         mPidAdapter.setPreset(preset);
         applyActivePresetPolling();
         refreshPresetChipsUi();
@@ -1479,6 +1492,31 @@ public class MainActivity extends PluginManager
             }
         }
 
+        ImageView ivConnectReal = findViewById(R.id.iv_btn_connect_real);
+        if (ivConnectReal != null)
+        {
+            if (getMode() == MODE.ONLINE)
+            {
+                ivConnectReal.setImageResource(R.drawable.ic_visibility);
+            } else
+            {
+                switch (activeMedium)
+                {
+                    case NETWORK:
+                        ivConnectReal.setImageResource(R.drawable.ic_wifi);
+                        break;
+                    case USB:
+                        ivConnectReal.setImageResource(R.drawable.ic_usb);
+                        break;
+                    case BLE:
+                    case BLUETOOTH:
+                    default:
+                        ivConnectReal.setImageResource(R.drawable.ic_bluetooth);
+                        break;
+                }
+            }
+        }
+
         TextView tvConnectReal = findViewById(R.id.tv_btn_connect_real);
         if (tvConnectReal != null)
         {
@@ -1486,6 +1524,14 @@ public class MainActivity extends PluginManager
                     ? R.string.open_live_data
                     : R.string.connect_real_adapter);
         }
+
+        float navAlpha = (getMode() == MODE.OFFLINE) ? 0.62f : 1.0f;
+        View cardData = findViewById(R.id.card_nav_data);
+        View cardCodes = findViewById(R.id.card_nav_codes);
+        View cardVeh = findViewById(R.id.card_nav_veh);
+        if (cardData != null) cardData.setAlpha(navAlpha);
+        if (cardCodes != null) cardCodes.setAlpha(navAlpha);
+        if (cardVeh != null) cardVeh.setAlpha(navAlpha);
 
         View btnStartDemo = findViewById(R.id.btn_start_demo);
         TextView tvStartDemo = findViewById(R.id.tv_btn_start_demo);

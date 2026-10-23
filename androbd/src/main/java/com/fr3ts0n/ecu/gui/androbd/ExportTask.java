@@ -20,7 +20,6 @@ package com.fr3ts0n.ecu.gui.androbd;
 
 import static android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION;
 
-import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -34,171 +33,209 @@ import androidx.core.content.FileProvider;
 import org.achartengine.model.XYMultipleSeriesDataset;
 import org.achartengine.model.XYSeries;
 
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Locale;
 import java.util.SortedMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Builds the CSV dump for sharing.
- *
- * @author Erwin Scheuch-Heilig
+ * Builds a clean UTF-8 CSV dump from chart series and optionally opens the system Share sheet.
  */
-class ExportTask extends AsyncTask<XYMultipleSeriesDataset, Integer, String>
+@SuppressWarnings("deprecation")
+class ExportTask extends AsyncTask<XYMultipleSeriesDataset, Integer, Boolean>
 {
-
 	private final Activity activity;
-	@SuppressLint("SimpleDateFormat")
-	private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+	private final boolean forceShare;
 
-	private static final String OPT_FIELD_DELIM		= "csv_field_delimiter";
-	private static final String OPT_RECORD_DELIM	= "csv_record_delimiter";
-	private static final String OPT_TEXT_QUOTED 	= "csv_text_quoted";
-	private static final String OPT_SEND_EXPORT 	= "send_after_export";
+	private static final String OPT_FIELD_DELIM   = "csv_field_delimiter";
+	private static final String OPT_RECORD_DELIM  = "csv_record_delimiter";
+	private static final String OPT_TEXT_QUOTED   = "csv_text_quoted";
+	private static final String OPT_SEND_EXPORT   = "send_after_export";
 
-	private static String CSV_FIELD_DELIMITER = ",";
-	private static String CSV_LINE_DELIMITER = "\n";
-	private static boolean CSV_TEXT_QUOTED = false;
+	private final String fieldDelimiter;
+	private final String lineDelimiter;
+	private final boolean textQuoted;
 
 	private static final String TAG = ExportTask.class.getSimpleName();
 	private static final Logger log = Logger.getLogger(TAG);
-	
-	private final SharedPreferences prefs;
 
-	// file name to be saved
-    private final String path;
+	private final SharedPreferences prefs;
+	private final String path;
 	private final String fileName;
 
 	public ExportTask(Activity activity)
 	{
-		this.activity = activity;
-        path = FileHelper.getPath(activity).concat(File.separator+"csv");
-		fileName = path.concat(File.separator+FileHelper.getFileName()
-                       .concat(".csv"));
-
-		// get preferences
-		prefs = PreferenceManager.getDefaultSharedPreferences(activity);
-		CSV_FIELD_DELIMITER = prefs.getString(OPT_FIELD_DELIM,",");
-		CSV_LINE_DELIMITER  = prefs.getString(OPT_RECORD_DELIM,"\n");
-		CSV_TEXT_QUOTED     = prefs.getBoolean(OPT_TEXT_QUOTED,false);
+		this(activity, false);
 	}
 
-	private static String quoteStringIfNeeded(String string)
+	public ExportTask(Activity activity, boolean forceShare)
 	{
-		return String.format( CSV_TEXT_QUOTED ? "\"%s\"" : "%s", string);
+		this.activity = activity;
+		this.forceShare = forceShare;
+		this.path = FileHelper.getPath(activity) + File.separator + "csv";
+		this.fileName = path + File.separator + FileHelper.getFileName() + ".csv";
+
+		this.prefs = PreferenceManager.getDefaultSharedPreferences(activity);
+		this.fieldDelimiter = prefs.getString(OPT_FIELD_DELIM, ",");
+		this.lineDelimiter = prefs.getString(OPT_RECORD_DELIM, "\n");
+		this.textQuoted = prefs.getBoolean(OPT_TEXT_QUOTED, false);
+	}
+
+	private String quoteStringIfNeeded(String string)
+	{
+		String safe = string != null ? string : "";
+		return textQuoted ? ("\"" + safe.replace("\"", "\"\"") + "\"") : safe;
 	}
 
 	@Override
-	protected String doInBackground(XYMultipleSeriesDataset... params)
+	protected Boolean doInBackground(XYMultipleSeriesDataset... params)
 	{
-		double currX;
-		double currY;
+		if (params == null || params.length == 0 || params[0] == null)
+		{
+			return false;
+		}
+		XYSeries[] series = params[0].getSeries();
+		if (series == null || series.length == 0)
+		{
+			return false;
+		}
+
 		int maxCounts = 0;
-		int highestResChannel = 0;	/* channel id with highest x-resolution */
-
-		XYSeries series[] = params[0].getSeries();
-
-		// find channel with highest x-resolution
+		int highestResChannel = 0;
 		for (int i = 0; i < series.length; i++)
 		{
-			if (maxCounts < series[i].getItemCount())
+			int cnt = series[i].getItemCount();
+			if (maxCounts < cnt)
 			{
-				maxCounts = series[i].getItemCount();
+				maxCounts = cnt;
 				highestResChannel = i;
 			}
 		}
-		
+
+		if (maxCounts == 0)
+		{
+			return false;
+		}
+
+		DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
 		//noinspection ResultOfMethodCallIgnored
 		new File(path).mkdirs();
-		FileWriter writer;
-		try
-		{
-			writer = new FileWriter(new File(fileName));
 
-			// create header line
+		try (FileOutputStream fos = new FileOutputStream(new File(fileName));
+		     BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fos, StandardCharsets.UTF_8)))
+		{
+			// UTF-8 BOM for Excel compatibility
+			writer.write('\uFEFF');
+
+			// Header row
 			writer.append(quoteStringIfNeeded(activity.getString(R.string.time)));
-			writer.append(CSV_FIELD_DELIMITER);
 			for (XYSeries sery : series)
 			{
+				writer.append(fieldDelimiter);
 				writer.append(quoteStringIfNeeded(sery.getTitle()));
-				writer.append(CSV_FIELD_DELIMITER);
 			}
-			writer.append(CSV_LINE_DELIMITER);
+			writer.append(lineDelimiter);
 
-			// generate data
+			// Data rows (always emit delimiter for every column so columns never shift!)
+			double[] lastKnown = new double[series.length];
+			boolean[] hasKnown = new boolean[series.length];
+
 			for (int i = 0; i < maxCounts; i++)
 			{
-				currX = series[highestResChannel].getX(i);
-				writer.append(dateFormat.format(new Date((long)currX)));
-				writer.append(CSV_FIELD_DELIMITER);
-				for (XYSeries sery : series)
+				double currX;
+				synchronized (series[highestResChannel])
 				{
-					try
-					{
-						SortedMap<Double, Double> map = sery.getRange(currX, currX, true);
-						currY = map.get(map.firstKey());
-						writer.append(String.valueOf(currY));
-						writer.append(CSV_FIELD_DELIMITER);
-					} catch (Exception ex)
-					{
-						// do nothing, just catch the error
-					}
+					if (i >= series[highestResChannel].getItemCount()) break;
+					currX = series[highestResChannel].getX(i);
 				}
-				writer.append(CSV_LINE_DELIMITER);
-				publishProgress(10000 * i / maxCounts);
+
+				writer.append(dateFormat.format(new Date((long) currX)));
+				for (int s = 0; s < series.length; s++)
+				{
+					writer.append(fieldDelimiter);
+					String cell = "";
+					synchronized (series[s])
+					{
+						try
+						{
+							SortedMap<Double, Double> map = series[s].getRange(currX - 500, currX + 500, true);
+							if (map != null && !map.isEmpty())
+							{
+								double y = map.get(map.lastKey());
+								lastKnown[s] = y;
+								hasKnown[s] = true;
+								cell = String.valueOf(y);
+							} else if (hasKnown[s])
+							{
+								cell = String.valueOf(lastKnown[s]);
+							}
+						} catch (Exception ignored)
+						{
+							if (hasKnown[s])
+							{
+								cell = String.valueOf(lastKnown[s]);
+							}
+						}
+					}
+					writer.append(cell);
+				}
+				writer.append(lineDelimiter);
 			}
-			writer.close();
-		}
-		catch (IOException e)
+			writer.flush();
+			return true;
+		} catch (IOException e)
 		{
-			e.printStackTrace();
+			log.log(Level.SEVERE, "CSV export failed", e);
+			return false;
 		}
-		return fileName;
 	}
 
 	@Override
-	public void onPreExecute()
+	public void onPostExecute(Boolean ok)
 	{
-		activity.setProgressBarVisibility(true);
-	}
+		if (activity == null || activity.isFinishing() || activity.isDestroyed())
+		{
+			return;
+		}
+		if (!Boolean.TRUE.equals(ok))
+		{
+			Toast.makeText(activity, R.string.no_numeric_items_yet, Toast.LENGTH_SHORT).show();
+			return;
+		}
 
-	@Override
-	public void onProgressUpdate(Integer... values)
-	{
-		activity.setProgress(values[0]);
-	}
-
-	@Override
-	public void onPostExecute(String result)
-	{
-		activity.setProgressBarVisibility(false);
-
-		// show saved message
-		String msg = String.format("CSV %s to %s",
-								   activity.getString(R.string.saved),
-								   fileName);
+		String msg = String.format("CSV %s: %s",
+				activity.getString(R.string.saved),
+				new File(fileName).getName());
 		log.log(Level.INFO, msg);
 		Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show();
 
-		// if export file should be sent immediately ...
-		if(prefs.getBoolean(OPT_SEND_EXPORT, false))
+		if (forceShare || prefs.getBoolean(OPT_SEND_EXPORT, false))
 		{
-			Uri uri = FileProvider.getUriForFile(activity,
-					activity.getPackageName() + ".provider",
-					new File(fileName));
-// allow sending the generated file ...
-			Intent sendIntent = new Intent(Intent.ACTION_SEND);
-			sendIntent.setType("*/*");
-			sendIntent.putExtra(Intent.EXTRA_STREAM, uri);
-			sendIntent.addFlags(FLAG_GRANT_READ_URI_PERMISSION);
-			activity.startActivity(
-					Intent.createChooser(sendIntent,
-										 activity.getResources().getText(R.string.send_to)));
+			try
+			{
+				Uri uri = FileProvider.getUriForFile(activity,
+						activity.getPackageName() + ".provider",
+						new File(fileName));
+				Intent sendIntent = new Intent(Intent.ACTION_SEND);
+				sendIntent.setType("text/csv");
+				sendIntent.putExtra(Intent.EXTRA_STREAM, uri);
+				sendIntent.addFlags(FLAG_GRANT_READ_URI_PERMISSION);
+				activity.startActivity(
+						Intent.createChooser(sendIntent,
+								activity.getResources().getText(R.string.send_to)));
+			} catch (Exception ex)
+			{
+				log.log(Level.WARNING, "Share CSV intent failed", ex);
+			}
 		}
 	}
 }

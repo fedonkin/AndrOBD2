@@ -24,4 +24,5 @@
 
     <color name="progress_track">#E2E8F0</color>
     <color name="row_activated">#242563EB</color>
+    <color name="star_active">#F59E0B</color>
 </resources>

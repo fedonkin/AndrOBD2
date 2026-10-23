@@ -434,6 +434,8 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             {
                 boolean isFav = PidPresetManager.isFavorite(cachedFavorites, currPv);
                 holder.ivFavStar.setImageResource(isFav ? R.drawable.ic_star_filled : R.drawable.ic_star_outline);
+                holder.ivFavStar.setColorFilter(ContextCompat.getColor(getContext(),
+                        isFav ? R.color.star_active : R.color.text_tertiary));
                 holder.ivFavStar.setVisibility(View.VISIBLE);
                 holder.ivFavStar.setOnClickListener(v -> {
                     PidPresetManager.toggleFavorite(prefs, currPv);

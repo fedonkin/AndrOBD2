@@ -26,33 +26,25 @@ import com.fr3ts0n.prot.StreamHandler;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
- * Network communication service to allow connection to WIFI OBD adapters
- * Created by fr3ts0n on 17.04.16.
+ * Network communication service for Wi-Fi OBD-II adapters.
  */
 public class NetworkCommService
 	extends CommService
 	implements Runnable
 {
 	private static final int CONNECT_TIMEOUT_MS = 5000;
-	private Socket mSocket;
-	/** communication stream handler */
+	private volatile Socket mSocket;
 	private final StreamHandler ser = new StreamHandler();
 
-	/** default constructor */
 	public NetworkCommService()
 	{
 		super();
 	}
 
-	/**
-	 * Constructor. Prepares a new Network Communication session.
-	 *
-	 * @param context The UI Activity Context
-	 * @param handler A Handler to send messages back to the UI Activity
-	 */
 	public NetworkCommService(Context context, Handler handler)
 	{
 		super(context, handler);
@@ -64,24 +56,27 @@ public class NetworkCommService
 	{
 		log.fine("start");
 		elm.addTelegramWriter(ser);
-		Thread serThread = new Thread(this);
+		Thread serThread = new Thread(this, "WifiObdReader");
 		serThread.start();
 	}
 
 	@Override
-	public void stop()
+	public synchronized void stop()
 	{
 		log.fine("stop");
+		stopping = true;
 		elm.removeTelegramWriter(ser);
-		try
+		Socket sock = mSocket;
+		mSocket = null;
+		if (sock != null)
 		{
-			if (mSocket != null)
+			try
 			{
-				mSocket.close();
+				sock.close();
+			} catch (Exception e)
+			{
+				log.fine(String.valueOf(e.getMessage()));
 			}
-		} catch (Exception e)
-		{
-			log.severe(e.getMessage());
 		}
 		setState(STATE.OFFLINE);
 	}
@@ -89,20 +84,28 @@ public class NetworkCommService
 	@Override
 	public void write(byte[] out)
 	{
-		ser.writeTelegram(new String(out).toCharArray());
+		if (!stopping && out != null)
+		{
+			ser.writeTelegram(new String(out, StandardCharsets.UTF_8).toCharArray());
+		}
 	}
 
 	@Override
 	public void run()
 	{
-		ser.run();
-		connectionLost();
+		try
+		{
+			ser.run();
+		} catch (Exception e)
+		{
+			log.fine(String.valueOf(e.getMessage()));
+		}
+		if (!stopping && getState() == STATE.CONNECTED)
+		{
+			connectionLost();
+		}
 	}
 
-	/**
-	 * Thread for connecting network device
-	 * required to eliminate android.os.NetworkOnMainThreadException
-	 */
 	class ConnectThread extends Thread
 	{
 		final CommService svc;
@@ -111,6 +114,7 @@ public class NetworkCommService
 
 		ConnectThread(CommService svc, String device, int portNum)
 		{
+			super("WifiObdConnect");
 			this.svc = svc;
 			this.device = device;
 			this.portNum = portNum;
@@ -121,29 +125,36 @@ public class NetworkCommService
 		{
 			log.info(String.format(Locale.US, "Connecting to %s port %d", device, portNum));
 			setState(STATE.CONNECTING);
+			Socket sock = new Socket();
+			mSocket = sock;
 			try
 			{
-				mSocket = new Socket();
 				InetSocketAddress addr = new InetSocketAddress(device, portNum);
-				mSocket.connect(addr, CONNECT_TIMEOUT_MS);
-				ser.setStreams(mSocket.getInputStream(), mSocket.getOutputStream());
-				connectionEstablished(device + ":" + portNum);
+				sock.connect(addr, CONNECT_TIMEOUT_MS);
+				if (stopping)
+				{
+					sock.close();
+					return;
+				}
+				sock.setTcpNoDelay(true);
+				ser.setStreams(sock.getInputStream(), sock.getOutputStream());
+				// Register writer & reader thread BEFORE signaling CONNECTED so initial ATZ is sent
 				svc.start();
+				connectionEstablished(device + ":" + portNum);
 			} catch (Exception e)
 			{
-				log.severe(e.getMessage());
-				connectionFailed();
+				log.severe(String.valueOf(e.getMessage()));
+				if (!stopping)
+				{
+					connectionFailed();
+				}
 			}
 		}
 	}
 
-	/**
-	 * Open network connection to device using specified port
-	 * @param device address of device
-	 * @param portNum port to connect to
-	 */
 	public void connect(Object device, int portNum)
 	{
+		stopping = false;
 		new ConnectThread(this, String.valueOf(device), portNum).start();
 	}
 

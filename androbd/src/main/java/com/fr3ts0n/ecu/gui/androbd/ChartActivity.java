@@ -187,7 +187,7 @@ public class ChartActivity extends AppCompatActivity
         View btnShare = findViewById(R.id.btn_chart_share);
         if (btnShare != null)
         {
-            btnShare.setOnClickListener(v -> new ExportTask(this).execute(sensorData));
+            btnShare.setOnClickListener(v -> new ExportTask(this, true).execute(sensorData));
         }
     }
 
@@ -300,7 +300,7 @@ public class ChartActivity extends AppCompatActivity
     {
         if (item.getItemId() == R.id.share)
         {
-            new ExportTask(this).execute(sensorData);
+            new ExportTask(this, true).execute(sensorData);
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -430,7 +430,7 @@ public class ChartActivity extends AppCompatActivity
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setBackgroundResource(R.drawable.bg_card);
+        card.setBackgroundResource(R.drawable.bg_card_clickable);
         card.setPadding(dp(10), dp(6), dp(10), dp(6));
         card.setClickable(true);
         card.setFocusable(true);

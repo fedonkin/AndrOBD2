@@ -54,7 +54,7 @@
                 android:paddingStart="9dp"
                 android:paddingEnd="9dp"
                 android:text="@string/chart_win_30s"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/chip_text_color"
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
@@ -70,7 +70,7 @@
                 android:paddingStart="9dp"
                 android:paddingEnd="9dp"
                 android:text="@string/chart_win_2m"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/chip_text_color"
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
@@ -86,7 +86,7 @@
                 android:paddingStart="9dp"
                 android:paddingEnd="9dp"
                 android:text="@string/chart_win_5m"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/chip_text_color"
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
@@ -101,7 +101,7 @@
                 android:paddingStart="9dp"
                 android:paddingEnd="9dp"
                 android:text="@string/chart_win_all"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/chip_text_color"
                 android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
