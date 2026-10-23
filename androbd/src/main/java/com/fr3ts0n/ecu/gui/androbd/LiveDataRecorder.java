@@ -1367,6 +1367,15 @@ public class LiveDataRecorder
         }
         sb.append(")\n");
 
+        String autoDiag = buildAutoDiagnosisTextLocked(sortedCols, uniqueHeaders, ru);
+        if (!autoDiag.isEmpty())
+        {
+            sb.append('\n')
+                    .append(ru ? "[Автодиагностика записи]\n" : "[Auto-Diagnostic Summary]\n")
+                    .append(autoDiag)
+                    .append('\n');
+        }
+
         if (!staticCols.isEmpty())
         {
             sb.append('\n')
@@ -1771,6 +1780,45 @@ public class LiveDataRecorder
             sb.append(String.format(Locale.getDefault(), " (+%d)", ordered.size() - limit));
         }
         return sb.toString();
+    }
+
+    public synchronized String buildAutoDiagnosisText(boolean ru)
+    {
+        if (rows.size() < 3) return "";
+        List<ColumnMeta> sortedCols = getSortedColumnsLocked();
+        Map<String, String> uniqueHeaders = buildUniqueTableHeaders(sortedCols);
+        return buildAutoDiagnosisTextLocked(sortedCols, uniqueHeaders, ru);
+    }
+
+    private String buildAutoDiagnosisTextLocked(List<ColumnMeta> sortedCols,
+                                                Map<String, String> uniqueHeaders,
+                                                boolean ru)
+    {
+        if (rows.size() < 3) return "";
+        List<String> hdrs = new ArrayList<>(sortedCols.size() + 1);
+        hdrs.add(ru ? "Сек" : "Sec");
+        for (ColumnMeta col : sortedCols)
+        {
+            String h = uniqueHeaders.get(col.key);
+            hdrs.add(h != null ? h : col.tableHeader);
+        }
+
+        List<String[]> dataRows = new ArrayList<>(rows.size());
+        for (SampleRow r : rows)
+        {
+            String[] arr = new String[hdrs.size()];
+            arr[0] = String.valueOf(r.elapsedSec);
+            for (int i = 0; i < sortedCols.size(); i++)
+            {
+                String v = r.values.get(sortedCols.get(i).key);
+                arr[i + 1] = v != null ? v : "";
+            }
+            dataRows.add(arr);
+        }
+
+        List<LiveSessionAnalyzer.Finding> findings =
+                LiveSessionAnalyzer.analyzeTable(hdrs, dataRows, ru);
+        return LiveSessionAnalyzer.formatFindings(findings, ru);
     }
 
     /**

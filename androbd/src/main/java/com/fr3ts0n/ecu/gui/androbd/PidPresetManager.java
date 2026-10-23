@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
 import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
+import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
 import java.util.Arrays;
@@ -47,6 +48,7 @@ public class PidPresetManager
 
     /** Startup, idle & warm-up diagnostics PIDs */
     private static final Set<Integer> STARTUP_PIDS = unmodifiablePidSet(
+            0x03, 0x10, 0x51, // prerequisites for conservative gasoline estimate
             0x0C, // Engine RPM
             0x05, // Coolant Temperature
             0x42, // Control Module Voltage
@@ -59,11 +61,14 @@ public class PidPresetManager
             0x0F, // Intake Air Temperature
             0x46, // Ambient Air Temperature
             0x5C, // Engine Oil Temperature
-            0x1F  // Run Time Since Engine Start
+            0x1F, // Run Time Since Engine Start
+            ObdProt.VPID_ADAPTER_VOLTAGE,
+            ObdProt.VPID_FUEL_RATE_LH
     );
 
     /** Fuel system, mixture trims, airflow & O2/Lambda sensors */
     private static final Set<Integer> FUEL_PIDS = unmodifiablePidSet(
+            0x51, // confirmed fuel type
             0x0C, // Engine RPM (reference)
             0x03, // Fuel System Status (Open/Closed loop)
             0x06, // Short Term Fuel Trim B1
@@ -80,11 +85,16 @@ public class PidPresetManager
             0x44, // Commanded Equivalence Ratio
             0x14, 0x15, 0x18, 0x19, // Narrowband O2 B1S1/S2, B2S1/S2
             0x24, 0x25, 0x28, 0x29, // Wideband O2 voltage/lambda
-            0x34, 0x35, 0x38, 0x39  // Wideband O2 current/lambda
+            0x34, 0x35, 0x38, 0x39, // Wideband O2 current/lambda
+            ObdProt.VPID_TOTAL_TRIM_B1,
+            ObdProt.VPID_TOTAL_TRIM_B2,
+            ObdProt.VPID_FUEL_RATE_LH,
+            ObdProt.VPID_FUEL_ECON_L100
     );
 
     /** Dynamic driving telemetry */
     private static final Set<Integer> DRIVING_PIDS = unmodifiablePidSet(
+            0x03, 0x51, // fuel system state and fuel type
             0x0C, // Engine RPM
             0x0D, // Vehicle Speed
             0x05, // Coolant Temperature
@@ -97,7 +107,10 @@ public class PidPresetManager
             0x0E, // Timing Advance
             0x42, // Control Module Voltage
             0x5C, // Oil Temperature
-            0x5E  // Fuel Rate
+            0x5E, // Fuel Rate
+            ObdProt.VPID_ADAPTER_VOLTAGE,
+            ObdProt.VPID_FUEL_RATE_LH,
+            ObdProt.VPID_FUEL_ECON_L100
     );
 
     private static Set<Integer> unmodifiablePidSet(int... pids)
@@ -311,7 +324,9 @@ public class PidPresetManager
             String mnem = mnemObj != null ? String.valueOf(mnemObj).toLowerCase(Locale.ROOT) : "";
 
             if (pid == 0x42
+                    || pid == ObdProt.VPID_ADAPTER_VOLTAGE
                     || "ecu_voltage".equals(mnem)
+                    || "adapter_voltage".equals(mnem)
                     || "battery_voltage".equals(mnem)
                     || "control_module_voltage".equals(mnem)
                     || VehicleUiRegistry.isBrandBoardVoltageMnemonic(mnem))

@@ -329,4 +329,23 @@
     <string name="dtc_status_readiness">Готовность</string>
     <string name="dtc_report_profile_fmt">Профиль: %s</string>
     <string name="dtc_report_module_fmt">Блок: %s</string>
+
+    <string name="log_viewer">CSV-записи и графики</string>
+    <string name="log_open">Открыть CSV-файл</string>
+    <string name="log_recent">Недавние файлы</string>
+    <string name="log_hint">Просмотр без подключения. До четырёх каналов, каждый со своей шкалой. Проведите пальцем для просмотра значений.</string>
+    <string name="log_channels">Выбрать каналы (до 4)</string>
+    <string name="log_marks">Перейти к метке</string>
+    <string name="log_analysis">Предварительный анализ</string>
+    <string name="log_loading">Чтение CSV…</string>
+    <string name="log_error">Не удалось прочитать CSV: неверный формат, слишком большой файл или доступ истёк. Выберите файл заново.</string>
+    <string name="log_meta">%1$d отсчётов · %2$d с · %3$d числовых каналов</string>
+    <string name="log_insufficient">Недостаточно данных для анализа. Это не подтверждает исправность автомобиля.</string>
+    <string name="scan_all">Опросить все блоки</string>
+    <string name="scan_all_info">Опрос только для чтения в выбранном профиле. Припаркуйтесь, оставьте зажигание включённым. Ошибки не стираются. Неподдерживаемые блоки могут не ответить.</string>
+    <string name="scan_unavailable">Выберите профиль автомобиля и подключитесь. Перед опросом остановите запись Live.</string>
+    <string name="scan_wait">Опрос блоков…</string>
+    <string name="scan_no_response">Нет подтверждённого ответа / не поддерживается</string>
+    <string name="scan_response">Ответ получен; кодов: </string>
+    <string name="scan_timeout">Время опроса истекло. Результаты могут быть неполными.</string>
 </resources>

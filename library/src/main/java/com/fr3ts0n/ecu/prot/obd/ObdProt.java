@@ -40,7 +40,9 @@ import java.beans.PropertyChangeEvent;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.Stack;
 import java.util.Vector;
 
@@ -73,6 +75,15 @@ public class ObdProt extends ProtoHeader
     public static final int OBD_SVC_MOD_CODES_19 = 0x19;
     public static final int OBD_SVC_KWP_DATA = 0x21;
     public static final int OBD_SVC_EXT_DATA = 0x22;
+
+    /** Universal synthetic virtual PID codes */
+    public static final int VPID_ADAPTER_VOLTAGE = VirtualPidCalculator.VPID_ADAPTER_VOLTAGE;
+    public static final int VPID_TOTAL_TRIM_B1   = VirtualPidCalculator.VPID_TOTAL_TRIM_B1;
+    public static final int VPID_TOTAL_TRIM_B2   = VirtualPidCalculator.VPID_TOTAL_TRIM_B2;
+    public static final int VPID_FUEL_RATE_LH    = VirtualPidCalculator.VPID_FUEL_RATE_LH;
+    public static final int VPID_FUEL_ECON_L100  = VirtualPidCalculator.VPID_FUEL_ECON_L100;
+
+    public final VirtualPidCalculator virtualPids = new VirtualPidCalculator();
 
     /** negative response ID */
     private static final int OBD_ID_NRC = 0x7F;
@@ -516,9 +527,41 @@ public class ObdProt extends ProtoHeader
         fixedPids.clear();
         if (pidCodes != null)
         {
+            Set<Integer> wanted = new HashSet<Integer>();
+            for (int c : pidCodes)
+            {
+                wanted.add(Integer.valueOf(c));
+                if (c == VPID_TOTAL_TRIM_B1)
+                {
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+                else if (c == VPID_TOTAL_TRIM_B2)
+                {
+                    wanted.add(Integer.valueOf(0x08));
+                    wanted.add(Integer.valueOf(0x09));
+                }
+                else if (c == VPID_FUEL_RATE_LH)
+                {
+                    wanted.add(Integer.valueOf(0x10));
+                    wanted.add(Integer.valueOf(0x03));
+                    wanted.add(Integer.valueOf(0x51));
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+                else if (c == VPID_FUEL_ECON_L100)
+                {
+                    wanted.add(Integer.valueOf(0x10));
+                    wanted.add(Integer.valueOf(0x03));
+                    wanted.add(Integer.valueOf(0x51));
+                    wanted.add(Integer.valueOf(0x0D));
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+            }
             for (ObdPid currPid : pidSupported)
             {
-                if (Arrays.binarySearch(pidCodes, currPid.intValue()) >= 0)
+                if (wanted.contains(Integer.valueOf(currPid.intValue())))
                 {
                     fixedPids.add(currPid);
                 }
@@ -720,11 +763,15 @@ public class ObdProt extends ProtoHeader
                                 setNumCodes(Long.valueOf(msgPayload).intValue());
                                 // no break here ...
                             default:
+                                char[] payloadBytes = hexToBytes(String.valueOf(getPayLoad(buffer)));
                                 long updatePeriod =
                                     dataItems.updateDataItems(msgService,
                                                             msgPid,
-                                                            hexToBytes(String.valueOf(
-                                                                    getPayLoad(buffer))));
+                                                            payloadBytes);
+                                if (msgService == OBD_SVC_DATA)
+                                {
+                                    virtualPids.onMode01PidUpdated(msgPid, payloadBytes, PidPvs);
+                                }
                                 /* Update expected request timestamp for PID */
                                 for( ObdPid pid : pidSupported)
                                 {
@@ -959,6 +1006,7 @@ public class ObdProt extends ProtoHeader
         // reset fixed PIDs
         resetFixedPid();
         // Clear data items
+        virtualPids.reset(PidPvs);
         PidPvs.clear();
         tCodes.clear();
         VidPvs.clear();
@@ -976,6 +1024,10 @@ public class ObdProt extends ProtoHeader
             case OBD_SVC_DATA:
             case OBD_SVC_FREEZEFRAME:
                 // Clear data items
+                if (obdService == OBD_SVC_DATA)
+                {
+                    virtualPids.reset(PidPvs);
+                }
                 pidSupported.clear();
                 PidPvs.clear();
                 break;

@@ -252,4 +252,11 @@ public final class JaguarStypeUiProfile implements VehicleUiProfile
         for (int p : pids) s.add(Integer.valueOf(p));
         return Collections.unmodifiableSet(s);
     }
+    @Override public String getHealthCategory(String mnemonic) {
+        if ("jag_trans_fluid_temp".equals(mnemonic)) return "atf_temperature";
+        if ("jag_trans_oil_temp".equals(mnemonic)) return "atf_temperature";
+        if ("jag_engine_oil_temp".equals(mnemonic)) return "oil_temperature";
+        if ("jag_module_dtc_count".equals(mnemonic)) return "unverified_dtc_counter";
+        return mnemonic;
+    }
 }

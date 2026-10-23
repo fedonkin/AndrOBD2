@@ -253,6 +253,12 @@
             </LinearLayout>
         </LinearLayout>
 
+        <TextView android:id="@+id/btn_export_charts"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:padding="12dp" android:layout_marginTop="8dp"
+            android:background="@drawable/bg_btn_secondary" android:clickable="true"
+            android:focusable="true" android:gravity="center" android:text="@string/log_viewer"
+            android:textColor="@color/text_primary" android:textSize="13sp" />
         <!-- Close Button -->
         <TextView
             android:id="@+id/btn_export_close"

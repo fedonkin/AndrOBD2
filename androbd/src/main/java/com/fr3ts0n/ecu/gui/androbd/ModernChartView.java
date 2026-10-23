@@ -49,8 +49,23 @@ public class ModernChartView extends View
         }
     }
 
+    public static final class EventMarker
+    {
+        public final long timestampMs;
+        public final String label;
+
+        public EventMarker(long timestampMs, String label)
+        {
+            this.timestampMs = timestampMs;
+            this.label = label != null ? label : "";
+        }
+    }
+
     private final List<SeriesEntry> entries = new ArrayList<>();
+    private final List<EventMarker> markers = new ArrayList<>();
     private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint markerLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint markerTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint axisTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -66,6 +81,10 @@ public class ModernChartView extends View
     private boolean liveMode = true;
     private boolean paused = false;
     private long pausedRightEdgeMs = 0L;
+    private long customMinMs = -1L;
+    private long customMaxMs = -1L;
+    private long lastRenderedMinT = 0L;
+    private long lastRenderedMaxT = 0L;
     private float scrubFraction = -1f; // -1 = inactive, 0..1 = active crosshair position
 
     private float padLeft;
@@ -138,6 +157,17 @@ public class ModernChartView extends View
 
         tooltipTextPaint.setColor(textPriColor);
         tooltipTextPaint.setTextSize(sp(11.5f));
+
+        int markerColor = ContextCompat.getColor(context, R.color.status_demo);
+        markerLinePaint.setStyle(Paint.Style.STROKE);
+        markerLinePaint.setStrokeWidth(dp(1.2f));
+        markerLinePaint.setColor(markerColor);
+        markerLinePaint.setAlpha(185);
+        markerLinePaint.setPathEffect(new DashPathEffect(new float[]{dp(4f), dp(3f)}, 0f));
+
+        markerTextPaint.setColor(markerColor);
+        markerTextPaint.setTextSize(sp(9.5f));
+        markerTextPaint.setFakeBoldText(true);
     }
 
     private float dp(float v)
@@ -214,6 +244,52 @@ public class ModernChartView extends View
         invalidate();
     }
 
+    public void setEventMarkers(List<EventMarker> newMarkers)
+    {
+        markers.clear();
+        if (newMarkers != null)
+        {
+            markers.addAll(newMarkers);
+        }
+        invalidate();
+    }
+
+    public void setCustomRangeMs(long startMs, long endMs)
+    {
+        if (endMs > startMs)
+        {
+            customMinMs = startMs;
+            customMaxMs = endMs;
+        } else
+        {
+            customMinMs = -1L;
+            customMaxMs = -1L;
+        }
+        invalidate();
+    }
+
+    public void jumpToTimestamp(long timestampMs)
+    {
+        if (lastRenderedMaxT > lastRenderedMinT)
+        {
+            if (timestampMs < lastRenderedMinT || timestampMs > lastRenderedMaxT)
+            {
+                long halfSpan = (lastRenderedMaxT - lastRenderedMinT) / 2L;
+                customMinMs = timestampMs - halfSpan;
+                customMaxMs = timestampMs + halfSpan;
+                scrubFraction = 0.5f;
+            } else
+            {
+                scrubFraction = (float) ((double) (timestampMs - lastRenderedMinT)
+                        / (double) (lastRenderedMaxT - lastRenderedMinT));
+            }
+        } else
+        {
+            scrubFraction = 0.5f;
+        }
+        invalidate();
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event)
@@ -287,29 +363,36 @@ public class ModernChartView extends View
         }
 
         long maxT;
-        if (!liveMode)
-        {
-            maxT = (globalLatest > Long.MIN_VALUE) ? globalLatest : System.currentTimeMillis();
-        }
-        else if (paused && pausedRightEdgeMs > 0L)
-        {
-            maxT = pausedRightEdgeMs;
-        }
-        else
-        {
-            long now = System.currentTimeMillis();
-            maxT = (globalLatest > Long.MIN_VALUE) ? Math.max(globalLatest, now) : now;
-        }
-
         long minT;
-        if (timeWindowMs > 0L)
+        if (!liveMode && customMaxMs > customMinMs && customMinMs >= 0L)
         {
-            minT = maxT - timeWindowMs;
+            minT = customMinMs;
+            maxT = customMaxMs;
         } else
         {
-            minT = (globalEarliest < Long.MAX_VALUE) ? globalEarliest : (maxT - 30_000L);
-            if (maxT - minT < 5_000L) minT = maxT - 5_000L;
+            if (!liveMode)
+            {
+                maxT = (globalLatest > Long.MIN_VALUE) ? globalLatest : System.currentTimeMillis();
+            } else if (paused && pausedRightEdgeMs > 0L)
+            {
+                maxT = pausedRightEdgeMs;
+            } else
+            {
+                long now = System.currentTimeMillis();
+                maxT = (globalLatest > Long.MIN_VALUE) ? Math.max(globalLatest, now) : now;
+            }
+
+            if (timeWindowMs > 0L)
+            {
+                minT = maxT - timeWindowMs;
+            } else
+            {
+                minT = (globalEarliest < Long.MAX_VALUE) ? globalEarliest : (maxT - 30_000L);
+                if (maxT - minT < 5_000L) minT = maxT - 5_000L;
+            }
         }
+        lastRenderedMinT = minT;
+        lastRenderedMaxT = maxT;
         double spanT = Math.max(1000.0, (double) (maxT - minT));
 
         // 2. Compute per-series min/max inside [minT, maxT]
@@ -396,6 +479,24 @@ public class ModernChartView extends View
                 if (t == 0) labelX = Math.max(x, left + dp(20f));
                 if (t == 4) labelX = Math.min(x, right - dp(20f));
                 canvas.drawText(timeFmt.format(new Date(tickMs)), labelX, bottom + dp(17f), axisTextPaint);
+            }
+        }
+
+        // 4b. Draw event markers (MARK_1..N) if present in [minT, maxT]
+        if (!markers.isEmpty())
+        {
+            markerTextPaint.setTextAlign(Paint.Align.LEFT);
+            for (EventMarker mk : markers)
+            {
+                if (mk.timestampMs < minT || mk.timestampMs > maxT) continue;
+                float mx = (float) (left + ((mk.timestampMs - minT) / spanT) * plotW);
+                canvas.drawLine(mx, top, mx, bottom, markerLinePaint);
+                if (!mk.label.isEmpty())
+                {
+                    float tw = markerTextPaint.measureText(mk.label);
+                    float tx = (mx + dp(4f) + tw <= right) ? (mx + dp(4f)) : Math.max(left, mx - dp(4f) - tw);
+                    canvas.drawText(mk.label, tx, top + dp(11f), markerTextPaint);
+                }
             }
         }
 

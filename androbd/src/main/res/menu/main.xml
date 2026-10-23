@@ -34,6 +34,8 @@
         </menu>
     </item>
 
+    <item android:id="@+id/open_csv_log" android:title="@string/log_viewer" />
+    <item android:id="@+id/scan_all_modules" android:title="@string/scan_all" />
     <!-- Data Management Group -->
     <item
         android:id="@+id/copy_live_recording"

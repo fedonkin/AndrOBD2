@@ -18,6 +18,7 @@
 
 package com.fr3ts0n.ecu.prot.obd;
 
+import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.ObdCodeItem;
 import com.fr3ts0n.ecu.prot.obd.vehicles.TelegramSink;
 import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
@@ -59,6 +60,30 @@ public class ElmProt
 	 * property name for protocol status
 	 */
 	public static final String PROP_STATUS = "status";
+	/**
+	 * property name for multi-module DTC sweep progress (newValue = int[]{done, total})
+	 */
+	public static final String PROP_MODULE_SCAN_PROGRESS = "modscan";
+
+	private static final long ATRV_POLL_INTERVAL_MS = 2500L;
+
+	/**
+	 * Result entry for a single ECU module in a full multi-module DTC sweep.
+	 */
+	public static final class ModuleScanEntry
+	{
+		public final VehicleModule module;
+		public final List<EcuCodeItem> faultCodes;
+        public final boolean responseReceived;
+
+		public ModuleScanEntry(VehicleModule module, List<EcuCodeItem> faultCodes, boolean responseReceived)
+		{
+			this.module = module;
+            this.responseReceived = responseReceived;
+			this.faultCodes = Collections.unmodifiableList(
+					new ArrayList<EcuCodeItem>(faultCodes));
+		}
+	}
 	
 	/**
 	 * CAN protocol handler
@@ -99,6 +124,15 @@ public class ElmProt
 	 * last detected message counter ID
 	 */
 	private int lastMsgId = 0;
+
+	private long nextAtRvPollMs = 0L;
+	private boolean atRvUnsupported = false;
+
+	private final List<VehicleModule> pendingAllModuleQueue = new ArrayList<VehicleModule>();
+	private final List<ModuleScanEntry> completedModuleEntries = new ArrayList<ModuleScanEntry>();
+	private volatile VehicleModule currentScanningModule = null;
+	private int allModuleTotalCount = 0;
+    private boolean moduleResponseReceived;
 
 	/**
 	 * ELM protocol ID's
@@ -674,6 +708,9 @@ public class ElmProt
 	
 	private void initialize()
 	{
+		nextAtRvPollMs = 0L;
+		atRvUnsupported = false;
+        virtualPids.reset(PidPvs);
 		// set status to INITIALIZING
 		setStatus(STAT.INITIALIZING);
 		
@@ -943,6 +980,11 @@ public class ElmProt
 					case STOPPED:
 						// was already handled before prompt
 					case QMARK:
+						if ("ATRV".equalsIgnoreCase(lastTxMsg))
+						{
+							atRvUnsupported = true;
+							responsePending = false;
+						}
 						// last command stays ignored
 					
 					case OK:
@@ -964,6 +1006,10 @@ public class ElmProt
 						{
 							if (moduleScanInProgress)
 							{
+								if (advanceOrFinishAllModuleScan())
+								{
+									break;
+								}
 								moduleScanInProgress = false;
 								setStatus(STAT.CONNECTED);
 								if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
@@ -1000,12 +1046,23 @@ public class ElmProt
 								case OBD_SVC_DATA:
 								case OBD_SVC_FREEZEFRAME:
 								{
+									long nowMs = System.currentTimeMillis();
+									if (service == OBD_SVC_DATA
+											&& !runDemo
+											&& !atRvUnsupported
+											&& hasSupportedPids()
+											&& nowMs >= nextAtRvPollMs)
+									{
+										nextAtRvPollMs = nowMs + ATRV_POLL_INTERVAL_MS;
+										sendTelegram("ATRV".toCharArray());
+										break;
+									}
 									if (service == OBD_SVC_DATA
 											&& VehicleProfileManager.isCustomProfileActive()
 											&& hasSupportedPids())
 									{
 										List<String> pollSeq = VehicleProfileManager.nextInterleavedPollSequence(
-												System.currentTimeMillis(),
+												nowMs,
 												true,
 												ecuAddresses,
 												selectedEcuAddress,
@@ -1039,6 +1096,12 @@ public class ElmProt
 			
 			// handle data response
 			default:
+				if ("ATRV".equalsIgnoreCase(lastTxMsg))
+				{
+					lastRxMsg = bufferStr;
+					responsePending = true;
+					return result;
+				}
 				// if we are still initializing check for address entries
 				switch (status)
 				{
@@ -1240,9 +1303,23 @@ public class ElmProt
 	 */
 	private int handleDataMessage(String lastRxMsg)
 	{
-		int result = 0;
-		
-		// otherwise process response
+		if ("ATRV".equalsIgnoreCase(lastTxMsg))
+		{
+			float volts = VirtualPidCalculator.parseAtRvVolts(lastRxMsg);
+			if (!Float.isNaN(volts))
+			{
+				virtualPids.publishAdapterVoltage(volts, PidPvs);
+			}
+			return 0;
+		}
+
+        if (currentScanningModule != null && lastRxMsg != null
+                && lastRxMsg.matches("(?i)(43|47|4A|53|58|59)[0-9A-F]*")) {
+            moduleResponseReceived = true;
+        }
+        int result = 0;
+
+        // otherwise process response
 		switch (service)
 		{
 			case OBD_SVC_CAN_MONITOR:
@@ -1258,6 +1335,12 @@ public class ElmProt
 
 	private boolean handleOptionalProfileFailure()
 	{
+		if ("ATRV".equalsIgnoreCase(lastTxMsg))
+		{
+			atRvUnsupported = true;
+			proceedAfterOptionalFailure();
+			return true;
+		}
 		if (VehicleProfileManager.isCustomProfileActive()
 				&& (moduleScanInProgress || VehicleProfileManager.isOptionalCommand(lastTxMsg)))
 		{
@@ -1281,6 +1364,10 @@ public class ElmProt
 		}
 		if (moduleScanInProgress)
 		{
+			if (advanceOrFinishAllModuleScan())
+			{
+				return;
+			}
 			moduleScanInProgress = false;
 			setStatus(STAT.CONNECTED);
 			if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
@@ -1354,6 +1441,13 @@ public class ElmProt
 	 */
 	public synchronized void scanVehicleModuleDtcs(VehicleModule module)
 	{
+		pendingAllModuleQueue.clear();
+		currentScanningModule = null;
+		startSingleModuleScanLocked(module, false);
+	}
+
+	private void startSingleModuleScanLocked(VehicleModule module, boolean partOfAllModuleSweep)
+	{
 		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
 		if (handler == null)
 		{
@@ -1361,6 +1455,7 @@ public class ElmProt
 		}
 		handler.setActiveModule(module);
 		VehicleModule target = handler.getActiveModule();
+        moduleResponseReceived = false;
 		demoCodesCleared = false;
 		this.service = OBD_SVC_READ_CODES;
 		cmdStack.clear();
@@ -1374,7 +1469,7 @@ public class ElmProt
 
 		if (target == null || target.isEngineObd())
 		{
-			moduleScanInProgress = false;
+			moduleScanInProgress = partOfAllModuleSweep;
 			List<String> seq = new ArrayList<String>();
 			if (customModuleBusActive)
 			{
@@ -1401,6 +1496,201 @@ public class ElmProt
 				pushOrderedCommands(cmds);
 				sendQueuedTelegram();
 			}
+			else if (partOfAllModuleSweep)
+			{
+				moduleScanInProgress = true;
+				advanceOrFinishAllModuleScan();
+			}
+		}
+	}
+
+	/**
+	 * Sequentially scan ALL diagnostic ECU modules supported by the active vehicle profile
+	 * and aggregate their fault codes into {@code tCodes} and {@link #getLastAllModuleScanResults()}.
+	 */
+	public synchronized boolean scanAllVehicleModules()
+	{
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			return false;
+		}
+		List<VehicleModule> modules = handler.getAvailableModules();
+		if (modules == null || modules.isEmpty())
+		{
+			return false;
+		}
+
+		pendingAllModuleQueue.clear();
+		completedModuleEntries.clear();
+		pendingAllModuleQueue.addAll(modules);
+		allModuleTotalCount = modules.size();
+		demoCodesCleared = false;
+		this.service = OBD_SVC_READ_CODES;
+
+		if (runDemo)
+		{
+			for (VehicleModule mod : modules)
+			{
+				handler.setActiveModule(mod);
+				prepareModuleScanReset();
+				handler.emitDemoDtcs(mod, demoObdSink);
+				completedModuleEntries.add(new ModuleScanEntry(mod, snapshotRealFaultCodesLocked(handler, mod), true));
+			}
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
+			moduleScanInProgress = false;
+			finalizeAllModuleResultsLocked(handler);
+			firePropertyChange(new PropertyChangeEvent(
+					this, PROP_MODULE_SCAN_PROGRESS, null,
+					new int[]{allModuleTotalCount, allModuleTotalCount}));
+			return true;
+		}
+
+		VehicleModule firstMod = pendingAllModuleQueue.remove(0);
+		currentScanningModule = firstMod;
+		firePropertyChange(new PropertyChangeEvent(
+				this, PROP_MODULE_SCAN_PROGRESS, null,
+				new int[]{0, allModuleTotalCount}));
+		startSingleModuleScanLocked(firstMod, true);
+		return true;
+	}
+
+	public synchronized boolean isAllModuleScanInProgress()
+	{
+		return currentScanningModule != null;
+	}
+
+	public synchronized VehicleModule getCurrentScanningModule()
+	{
+		return currentScanningModule;
+	}
+
+	public synchronized List<ModuleScanEntry> getLastAllModuleScanResults()
+	{
+		return Collections.unmodifiableList(
+				new ArrayList<ModuleScanEntry>(completedModuleEntries));
+	}
+
+	public synchronized void cancelAllModuleScan()
+	{
+		pendingAllModuleQueue.clear();
+		currentScanningModule = null;
+		moduleScanInProgress = false;
+		cmdStack.clear();
+        this.service = OBD_SVC_NONE;
+		if (customModuleBusActive && !runDemo)
+		{
+			customModuleBusActive = false;
+			pushOrderedCommands(buildStandardBusRestoreCommands());
+			sendQueuedTelegram();
+		}
+	}
+
+	private boolean advanceOrFinishAllModuleScan()
+	{
+		if (currentScanningModule == null)
+		{
+			return false;
+		}
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
+			moduleScanInProgress = false;
+			return false;
+		}
+
+		completedModuleEntries.add(new ModuleScanEntry(
+				currentScanningModule, snapshotRealFaultCodesLocked(handler, currentScanningModule), moduleResponseReceived));
+		int doneCount = completedModuleEntries.size();
+
+		if (!pendingAllModuleQueue.isEmpty())
+		{
+			VehicleModule nextMod = pendingAllModuleQueue.remove(0);
+			currentScanningModule = nextMod;
+			firePropertyChange(new PropertyChangeEvent(
+					this, PROP_MODULE_SCAN_PROGRESS, null,
+					new int[]{doneCount, allModuleTotalCount}));
+			startSingleModuleScanLocked(nextMod, true);
+			return true;
+		}
+
+		currentScanningModule = null;
+		moduleScanInProgress = false;
+		finalizeAllModuleResultsLocked(handler);
+		setStatus(STAT.CONNECTED);
+		if (customModuleBusActive && !runDemo)
+		{
+			customModuleBusActive = false;
+			pushOrderedCommands(buildStandardBusRestoreCommands());
+			sendQueuedTelegram();
+		}
+		firePropertyChange(new PropertyChangeEvent(
+				this, PROP_MODULE_SCAN_PROGRESS, null,
+				new int[]{allModuleTotalCount, allModuleTotalCount}));
+		return true;
+	}
+
+	private List<EcuCodeItem> snapshotRealFaultCodesLocked(VehicleProfileHandler handler, VehicleModule mod)
+	{
+		List<EcuCodeItem> out = new ArrayList<EcuCodeItem>();
+		String tagPrefix = "[" + mod.getShortTag() + "] ";
+		for (Object raw : tCodes.values())
+		{
+			if (!(raw instanceof EcuCodeItem)) continue;
+			EcuCodeItem ci = (EcuCodeItem) raw;
+			String codeStr = String.valueOf(ci.get(EcuCodeItem.FID_CODE));
+			if (codeStr == null || codeStr.isEmpty()
+					|| "P0000".equalsIgnoreCase(codeStr)
+					|| "0000".equalsIgnoreCase(codeStr))
+			{
+				continue;
+			}
+			if (handler != null && handler.isSystemPassCode(codeStr))
+			{
+				continue;
+			}
+			String desc = String.valueOf(ci.get(EcuCodeItem.FID_DESCRIPT));
+			if (!desc.startsWith("["))
+			{
+				desc = tagPrefix + desc;
+			}
+			EcuCodeItem copy = new ObdCodeItem(0, desc);
+			copy.put(EcuCodeItem.FID_CODE, codeStr);
+			Object statusObj = ci.get(EcuCodeItem.FID_STATUS);
+			if (statusObj != null)
+			{
+				copy.put(EcuCodeItem.FID_STATUS, statusObj);
+			}
+			out.add(copy);
+		}
+		return out;
+	}
+
+	private void finalizeAllModuleResultsLocked(VehicleProfileHandler handler)
+	{
+		List<VehicleModule> avail = handler.getAvailableModules();
+		if (avail != null && !avail.isEmpty())
+		{
+			handler.setActiveModule(avail.get(0));
+		}
+		tCodes.clear();
+		for (int mIdx = 0; mIdx < completedModuleEntries.size(); mIdx++)
+		{
+			ModuleScanEntry entry = completedModuleEntries.get(mIdx);
+			for (int cIdx = 0; cIdx < entry.faultCodes.size(); cIdx++)
+			{
+				int syntheticKey = ((mIdx + 1) << 16) | (cIdx + 1);
+				tCodes.put(Integer.valueOf(syntheticKey), entry.faultCodes.get(cIdx));
+			}
+		}
+        // Do not reinterpret aggregate OEM codes as the Mode 01 MIL/count byte.
+		if (tCodes.isEmpty())
+		{
+			tCodes.put(Integer.valueOf(0),
+					new ObdCodeItem(0, Messages.getString("module_scan_review")));
 		}
 	}
 
@@ -1416,6 +1706,7 @@ public class ElmProt
 		}
 		handler.setActiveModule(module);
 		VehicleModule target = handler.getActiveModule();
+        moduleResponseReceived = false;
 		cmdStack.clear();
 		prepareModuleScanReset();
 
@@ -1564,6 +1855,11 @@ public class ElmProt
 									service == OBD_SVC_DATA ? "4%X%02X%02X%02X%02X%02X"
 									                        : "4%X%02X00%02X%02X%02X%02X",
 									service, pid, value, value, value, value).toCharArray());
+								if (service == OBD_SVC_DATA && (demoTick % 16 == 0))
+								{
+									float demoVolts = 14.10f + 0.15f * (float) Math.sin(demoTick / 16.0);
+									virtualPids.publishAdapterVoltage(demoVolts, PidPvs);
+								}
 								if (service == OBD_SVC_DATA
 										&& currentHandler != null
 										&& (demoTick % 8 == 0))
@@ -1683,6 +1979,8 @@ public class ElmProt
 		{
 			log.info("OBD Service: " + this.service + "->" + service);
 			this.service = service;
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
 			moduleScanInProgress = false;
 
 			// If we previously targeted a custom ECU module (CCM / ABS / TCM / MDPS / etc.)

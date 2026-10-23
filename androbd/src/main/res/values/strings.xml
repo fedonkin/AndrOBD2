@@ -533,4 +533,23 @@ period of time while the ECU recalibrates itself.
     <string name="dtc_status_readiness">Readiness</string>
     <string name="dtc_report_profile_fmt">Profile: %s</string>
     <string name="dtc_report_module_fmt">Module: %s</string>
+
+    <string name="log_viewer">CSV logs and charts</string>
+    <string name="log_open">Open CSV file</string>
+    <string name="log_recent">Recent files</string>
+    <string name="log_hint">Offline viewer. Select up to four channels. Each curve has its own scale; drag to inspect values.</string>
+    <string name="log_channels">Select channels (up to 4)</string>
+    <string name="log_marks">Go to marker</string>
+    <string name="log_analysis">Preliminary observations</string>
+    <string name="log_loading">Reading CSV…</string>
+    <string name="log_error">Cannot read CSV: invalid, too large, or permission expired. Open it again using the file picker.</string>
+    <string name="log_meta">%1$d samples · %2$d s · %3$d numeric channels</string>
+    <string name="log_insufficient">Insufficient data for analysis. This does not confirm vehicle health.</string>
+    <string name="scan_all">Scan all modules</string>
+    <string name="scan_all_info">Read-only scan for the selected vehicle profile. Park safely, keep ignition on. No codes will be cleared. Unsupported modules may not respond.</string>
+    <string name="scan_unavailable">Select a vehicle profile and connect first. Stop Live recording before scanning.</string>
+    <string name="scan_wait">Scanning modules…</string>
+    <string name="scan_no_response">No confirmed response / unsupported</string>
+    <string name="scan_response">Response received; codes: </string>
+    <string name="scan_timeout">Scan timed out. Results may be incomplete.</string>
 </resources>

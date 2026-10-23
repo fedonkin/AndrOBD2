@@ -42,6 +42,7 @@ import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.HashConversion;
 import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
 import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
+import com.fr3ts0n.ecu.prot.obd.VirtualPidCalculator;
 import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
@@ -350,19 +351,18 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         }
         VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
         String seedKey = activeUi != null ? activeUi.getSettingsSeedPrefKey() : null;
-        if (seedKey != null
+        boolean includeBrandExt = (seedKey != null
                 && prefs.contains(SettingsActivity.KEY_DATA_ITEMS)
-                && !prefs.getBoolean(seedKey, false))
+                && !prefs.getBoolean(seedKey, false));
+        for (Object val : pvs.values())
         {
-            for (Object val : pvs.values())
+            if (val instanceof EcuDataPv)
             {
-                if (val instanceof EcuDataPv)
+                int pid = ((EcuDataPv) val).getAsInt(EcuDataPv.FID_PID);
+                if (VirtualPidCalculator.isVirtualPid(pid)
+                        || (includeBrandExt && VehicleProfileManager.ownsExtendedPid(pid)))
                 {
-                    int pid = ((EcuDataPv) val).getAsInt(EcuDataPv.FID_PID);
-                    if (VehicleProfileManager.ownsExtendedPid(pid))
-                    {
-                        filtered.add(val);
-                    }
+                    filtered.add(val);
                 }
             }
         }
@@ -442,20 +442,17 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         String rawDescription = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
         String description = LiveDataRecorder.cleanDescription(pidNum, mnemonic, rawDescription, units);
         holder.tvDescr.setText(description);
+        holder.tvSublabel.setTextColor(ContextCompat.getColor(getContext(), R.color.text_tertiary));
         VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
         String extSublabel = activeUi != null
                 ? activeUi.formatExtendedSublabel(pidNum, mnemonic) : null;
+        String baseSublabel = null;
         if (extSublabel != null)
         {
-            holder.tvSublabel.setText(extSublabel);
-            holder.tvSublabel.setVisibility(View.VISIBLE);
+            baseSublabel = extSublabel;
         } else if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
         {
-            holder.tvSublabel.setText(mnemonic);
-            holder.tvSublabel.setVisibility(View.VISIBLE);
-        } else
-        {
-            holder.tvSublabel.setVisibility(View.GONE);
+            baseSublabel = mnemonic;
         }
 
         String fmtText;
@@ -466,7 +463,46 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         int pidColor = (currPv instanceof EcuDataPv)
                 ? ColorAdapter.getItemColor((EcuDataPv) currPv)
                 : ColorAdapter.getItemColor(position);
-        tintViewBackground(holder.itemAccent, pidColor);
+
+        boolean ru = Locale.getDefault().getLanguage().toLowerCase(Locale.US).startsWith("ru");
+        LiveHealthEvaluator.HealthStatus health = LiveHealthEvaluator.HealthStatus.NORMAL;
+        if (colVal instanceof Number
+                && !(cnvObj instanceof Conversion[]
+                && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] instanceof BitmapConversion)
+                && !(cnvObj instanceof Conversion[]
+                && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] instanceof HashConversion))
+        {
+            health = LiveHealthEvaluator.evaluate(
+                    pidNum, activeUi != null ? activeUi.getHealthCategory(mnemonic) : mnemonic,
+                    ((Number) colVal).doubleValue(), units, ru);
+        }
+
+        if (health.severity != LiveHealthEvaluator.Severity.NORMAL)
+        {
+            int statusColor = ContextCompat.getColor(getContext(),
+                    health.severity == LiveHealthEvaluator.Severity.ALERT
+                            ? R.color.status_danger
+                            : R.color.status_demo);
+            holder.tvValue.setTextColor(statusColor);
+            tintViewBackground(holder.itemAccent, statusColor);
+            String combinedSub = (baseSublabel != null && !baseSublabel.isEmpty())
+                    ? (baseSublabel + " · " + health.shortHint)
+                    : health.shortHint;
+            holder.tvSublabel.setText(combinedSub);
+            holder.tvSublabel.setTextColor(statusColor);
+            holder.tvSublabel.setVisibility(View.VISIBLE);
+        } else
+        {
+            tintViewBackground(holder.itemAccent, pidColor);
+            if (baseSublabel != null)
+            {
+                holder.tvSublabel.setText(baseSublabel);
+                holder.tvSublabel.setVisibility(View.VISIBLE);
+            } else
+            {
+                holder.tvSublabel.setVisibility(View.GONE);
+            }
+        }
 
         boolean isDiscreteConversion = false;
         try
@@ -511,6 +547,10 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             holder.progressBar.setVisibility(ProgressBar.GONE);
         }
 
+        if (colVal instanceof Number && (Double.isNaN(((Number)colVal).doubleValue())
+                || Double.isInfinite(((Number)colVal).doubleValue()))) {
+            fmtText = "—"; holder.progressBar.setVisibility(View.GONE);
+        }
         boolean useWideTextRow = (!(colVal instanceof Number) || isDiscreteConversion)
                 && fmtText != null
                 && fmtText.length() > 12;

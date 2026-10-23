@@ -1921,6 +1921,66 @@ public class MainActivity extends PluginManager
         return chip;
     }
 
+    private AlertDialog fullScanDialog;
+    private long fullScanDeadline;
+    private final Runnable fullScanWatch = new Runnable() {
+        @Override public void run() {
+            if (isFinishing() || fullScanDialog == null || !fullScanDialog.isShowing()) return;
+            if (CommService.elm.isAllModuleScanInProgress()) {
+                if (android.os.SystemClock.elapsedRealtime() >= fullScanDeadline) {
+                    CommService.elm.cancelAllModuleScan();
+                    fullScanDialog.setMessage(getString(R.string.scan_timeout));
+                    return;
+                }
+                VehicleModule mod = CommService.elm.getCurrentScanningModule();
+                fullScanDialog.setMessage(getString(R.string.scan_wait) + "\n"
+                        + CommService.elm.getLastAllModuleScanResults().size() + " · "
+                        + (mod == null ? "" : mod.getShortTag()));
+                mHandler.postDelayed(this, 500);
+            } else {
+                StringBuilder report = new StringBuilder();
+                for (ElmProt.ModuleScanEntry entry : CommService.elm.getLastAllModuleScanResults()) {
+                    report.append(entry.module.getShortTag()).append(": ")
+                        .append(entry.responseReceived ? getString(R.string.scan_response) + entry.faultCodes.size()
+                                : getString(R.string.scan_no_response)).append('\n');
+                    for (com.fr3ts0n.ecu.EcuCodeItem code : entry.faultCodes) {
+                        report.append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE)).append(" — ")
+                            .append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_DESCRIPT)).append('\n');
+                    }
+                    report.append('\n');
+                }
+                fullScanDialog.setMessage(report.toString());
+                if (mDfcAdapter != null) mDfcAdapter.setPvList(ObdProt.tCodes);
+            }
+        }
+    };
+
+    private void confirmFullScan() {
+        if (getMode() == MODE.OFFLINE || getMode() == MODE.FILE
+                || !VehicleProfileManager.isCustomProfileActive() || liveDataRecorder.isRecording()) {
+            Toast.makeText(this, R.string.scan_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle(R.string.scan_all).setMessage(R.string.scan_all_info)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok, (d,w) -> {
+                fullScanDialog = new AlertDialog.Builder(this).setTitle(R.string.scan_all)
+                    .setMessage(R.string.scan_wait).setNegativeButton(R.string.dialog_close, (a,b) -> { })
+                    .create();
+                fullScanDialog.setOnDismissListener(a -> {
+                    mHandler.removeCallbacks(fullScanWatch);
+                    if (CommService.elm.isAllModuleScanInProgress()) CommService.elm.cancelAllModuleScan();
+                });
+                fullScanDialog.show();
+                fullScanDeadline = android.os.SystemClock.elapsedRealtime() + 180000L;
+                if (CommService.elm.scanAllVehicleModules()) {
+                    // Protocol is already in READ_CODES: bind UI without issuing another scan.
+                    setObdService(ObdProt.OBD_SVC_READ_CODES, getString(R.string.obd_codes));
+                    mHandler.post(fullScanWatch);
+                } else fullScanDialog.setMessage(getString(R.string.scan_unavailable));
+            }).show();
+    }
+
     private void selectAndScanVehicleModule(VehicleModule module)
     {
         VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
@@ -2443,7 +2503,9 @@ public class MainActivity extends PluginManager
         }
         if (tvPreview != null)
         {
-            tvPreview.setText(liveDataRecorder.buildShortPreview(6));
+            String observations = liveDataRecorder.buildAutoDiagnosisText(ru);
+            tvPreview.setText(observations.isEmpty() ? liveDataRecorder.buildShortPreview(6) : observations);
+            tvPreview.setMaxLines(Integer.MAX_VALUE);
         }
         if (tvSaveSub != null)
         {
@@ -2502,6 +2564,22 @@ public class MainActivity extends PluginManager
             });
         }
 
+        View btnCharts = content.findViewById(R.id.btn_export_charts);
+        if (btnCharts != null) btnCharts.setOnClickListener(v -> {
+            File file = ensureCsvBackupSavedSync();
+            if (file == null) {
+                Toast.makeText(this, R.string.live_rec_csv_save_failed_toast, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            try {
+                Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".provider", file);
+                startActivity(new Intent(this, LogViewerActivity.class).setData(uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                dialog.dismiss();
+            } catch (Exception e) {
+                Toast.makeText(this, R.string.log_error, Toast.LENGTH_LONG).show();
+            }
+        });
         View btnClose = content.findViewById(R.id.btn_export_close);
         if (btnClose != null)
         {
@@ -2636,6 +2714,8 @@ public class MainActivity extends PluginManager
         {
             updateTimer.cancel();
         }
+        mHandler.removeCallbacks(fullScanWatch);
+        if (fullScanDialog != null && fullScanDialog.isShowing()) fullScanDialog.dismiss();
         liveDataRecorder.setOnTickListener(null);
         ModernUiUtils.optimizeListView(getListView());
     }
@@ -2671,6 +2751,8 @@ public class MainActivity extends PluginManager
     {
         cancelAutoReconnect();
         setAutoHider(false);
+        mHandler.removeCallbacks(fullScanWatch);
+        if (fullScanDialog != null && fullScanDialog.isShowing()) fullScanDialog.dismiss();
         liveDataRecorder.setOnTickListener(null);
         if (isFinishing() && liveDataRecorder.isRecording())
         {
@@ -2879,6 +2961,14 @@ public class MainActivity extends PluginManager
             return true;
         }
 
+        if (id == R.id.open_csv_log) {
+            startActivity(new Intent(this, LogViewerActivity.class));
+            return true;
+        }
+        if (id == R.id.scan_all_modules) {
+            confirmFullScan();
+            return true;
+        }
         if (id == R.id.copy_live_recording)
         {
             showLiveExportDialog(false);
@@ -4203,7 +4293,7 @@ public class MainActivity extends PluginManager
         final VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
         final VehicleModule targetMod = activeHandler != null
                 ? activeHandler.getActiveModule() : null;
-        final boolean isDirectModule = targetMod != null && !targetMod.isStandardEngineObd();
+        final boolean isDirectModule = targetMod != null && !targetMod.isEngineObd();
         String msg = isDirectModule
                 ? getString(R.string.vehicle_clear_module_fmt,
                         VehicleUiRegistry.getModuleDisplayName(this, targetMod))

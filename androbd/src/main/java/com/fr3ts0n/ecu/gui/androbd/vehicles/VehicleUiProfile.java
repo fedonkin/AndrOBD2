@@ -51,6 +51,9 @@ public interface VehicleUiProfile
     /** Localized display name of an ECU {@link VehicleModule} chip/dialog entry. */
     String getModuleDisplayName(Context ctx, VehicleModule module);
 
+    /** Map an OEM mnemonic to a generic observation category only while this profile is active. */
+    default String getHealthCategory(String mnemonic) { return mnemonic; }
+
     /** Format row sublabel for an extended brand PID (or return {@code null} for default). */
     String formatExtendedSublabel(int pid, String mnemonic);
 }

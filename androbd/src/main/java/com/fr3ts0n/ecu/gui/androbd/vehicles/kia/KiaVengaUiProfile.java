@@ -275,4 +275,12 @@ public final class KiaVengaUiProfile implements VehicleUiProfile
         for (int p : pids) s.add(Integer.valueOf(p));
         return Collections.unmodifiableSet(s);
     }
+    @Override public String getHealthCategory(String mnemonic) {
+        if ("kia_atf_temp".equals(mnemonic)) return "atf_temperature";
+        if ("kia_engine_oil_temp".equals(mnemonic)) return "oil_temperature";
+        if ("kia_coolant_temp".equals(mnemonic)) return "coolant_temp";
+        if ("kia_ecu_voltage".equals(mnemonic)) return "supply_voltage";
+        if ("kia_clu_voltage".equals(mnemonic)) return "supply_voltage";
+        return mnemonic;
+    }
 }
