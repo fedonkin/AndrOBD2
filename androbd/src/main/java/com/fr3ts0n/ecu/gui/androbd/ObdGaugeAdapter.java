@@ -138,7 +138,7 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 
 		holder.gauge.setTrianglesColor(pidColor);
 		holder.gauge.setSpeedometerColor(pidColor);
-		holder.gauge.setIndicatorColor(pidColor);
+		holder.gauge.getIndicator().setColor(pidColor);
 		holder.gauge.setBackgroundCircleColor(
 				ContextCompat.getColor(context, R.color.bg_surface_elevated));
 		holder.gauge.setSpeedTextColor(
