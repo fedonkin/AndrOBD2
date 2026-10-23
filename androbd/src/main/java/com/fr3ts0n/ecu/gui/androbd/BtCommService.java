@@ -378,7 +378,7 @@ public class BtCommService extends CommService
 			{
 				log.log(Level.SEVERE, "Comm thread aborted", ex);
 			}
-			if (!cancelled && !stopping && getState() == STATE.CONNECTED)
+			if (!cancelled && !stopping && BtCommService.this.getState() == STATE.CONNECTED)
 			{
 				connectionLost();
 			}
