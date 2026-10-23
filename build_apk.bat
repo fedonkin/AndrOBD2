@@ -175,7 +175,10 @@ if /i "!BUILD_TYPE!"=="release" (
 echo [4/5] Сборка проекта Gradle ^(!CLEAN_TASK! !ASSEMBLE_TASK! !TEST_TASK!^)...
 echo.
 
-call "%PROJECT_DIR%gradlew.bat" !CLEAN_TASK! !ASSEMBLE_TASK! !TEST_TASK! --stacktrace
+if exist "%PROJECT_DIR%.gradle\configuration-cache" (
+    rmdir /s /q "%PROJECT_DIR%.gradle\configuration-cache" >nul 2>&1
+)
+call "%PROJECT_DIR%gradlew.bat" --no-configuration-cache !CLEAN_TASK! !ASSEMBLE_TASK! !TEST_TASK! --stacktrace
 if errorlevel 1 (
     echo.
     echo [ERROR] Сборка Gradle завершилась с ошибкой. Проверьте журнал выше.
