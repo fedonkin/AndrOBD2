@@ -36,6 +36,11 @@
 
     <!-- Data Management Group -->
     <item
+        android:id="@+id/copy_live_recording"
+        android:icon="@drawable/ic_copy"
+        android:title="@string/live_rec_menu_copy"
+        android:visible="false" />
+    <item
         android:id="@+id/save"
         android:icon="@drawable/ic_save"
         android:title="@string/save" />

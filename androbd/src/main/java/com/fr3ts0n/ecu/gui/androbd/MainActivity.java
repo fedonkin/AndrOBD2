@@ -262,6 +262,22 @@ public class MainActivity extends PluginManager
     private boolean pendingConnectAfterPermission = false;
     private boolean pendingConnectAfterBtEnable = false;
 
+    private static final int MAX_CLIPBOARD_CHARS = 400_000;
+    static final LiveDataRecorder liveDataRecorder = new LiveDataRecorder(new LiveDataRecorder.DataSource()
+    {
+        @Override
+        public java.util.Collection<?> getPidItems()
+        {
+            return ObdProt.PidPvs != null ? ObdProt.PidPvs.values() : null;
+        }
+
+        @Override
+        public java.util.Collection<?> getPluginItems()
+        {
+            return mPluginPvs != null ? mPluginPvs.values() : null;
+        }
+    });
+
     @SuppressLint("HandlerLeak")
     private transient final Handler mHandler = new Handler(Looper.getMainLooper())
     {
@@ -938,6 +954,12 @@ public class MainActivity extends PluginManager
             btnDisconnectHome.setOnClickListener(v -> disconnectSession());
         }
 
+        View btnCopyRecordHome = findViewById(R.id.btn_copy_record_home);
+        if (btnCopyRecordHome != null)
+        {
+            btnCopyRecordHome.setOnClickListener(v -> copyLiveRecordingToClipboard());
+        }
+
         View cardData = findViewById(R.id.card_nav_data);
         if (cardData != null)
         {
@@ -1084,6 +1106,18 @@ public class MainActivity extends PluginManager
             btnQuickHud.setOnClickListener(v -> launchQuickVisualization(DATA_VIEW_MODE.HEADUP));
         }
 
+        View btnLiveRecord = mListView.findViewById(R.id.btn_live_record);
+        if (btnLiveRecord != null)
+        {
+            btnLiveRecord.setOnClickListener(v -> toggleLiveRecording());
+        }
+
+        View btnCopyLiveRecord = mListView.findViewById(R.id.btn_copy_live_record);
+        if (btnCopyLiveRecord != null)
+        {
+            btnCopyLiveRecord.setOnClickListener(v -> copyLiveRecordingToClipboard());
+        }
+
         View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
         if (btnClearCodesBar != null)
         {
@@ -1191,6 +1225,7 @@ public class MainActivity extends PluginManager
         refreshHomeUi();
         refreshDataHeaderUi();
         refreshDataListStats();
+        refreshLiveRecorderUi();
     }
 
     private void refreshHomeUi()
@@ -1293,6 +1328,23 @@ public class MainActivity extends PluginManager
                 tvDisconnectHome.setText(getMode() == MODE.DEMO
                         ? R.string.stop_demo_mode
                         : R.string.disconnect);
+            }
+        }
+
+        View btnCopyRecordHome = findViewById(R.id.btn_copy_record_home);
+        TextView tvCopyRecordHome = findViewById(R.id.tv_copy_record_home);
+        if (btnCopyRecordHome != null && tvCopyRecordHome != null)
+        {
+            if (liveDataRecorder.hasSamples() && !liveDataRecorder.isRecording())
+            {
+                btnCopyRecordHome.setVisibility(View.VISIBLE);
+                tvCopyRecordHome.setText(getString(
+                        R.string.live_rec_copy_home_fmt,
+                        liveDataRecorder.getSampleCount(),
+                        LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds())));
+            } else
+            {
+                btnCopyRecordHome.setVisibility(View.GONE);
             }
         }
     }
@@ -1429,6 +1481,260 @@ public class MainActivity extends PluginManager
         }
     }
 
+    /**
+     * Start or stop 1-second Live Data time-series recording.
+     */
+    private void toggleLiveRecording()
+    {
+        if (liveDataRecorder.isRecording())
+        {
+            stopLiveRecording(true);
+        } else
+        {
+            startLiveRecording();
+        }
+    }
+
+    private void startLiveRecording()
+    {
+        if (getMode() != MODE.ONLINE && getMode() != MODE.DEMO)
+        {
+            Toast.makeText(this, R.string.live_rec_connect_needed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (obdService != ObdProt.OBD_SVC_DATA)
+        {
+            setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
+        }
+
+        liveDataRecorder.start(this::refreshLiveRecorderUi);
+        syncKeepScreenOnFlag();
+        updateMenuVisibility();
+        refreshAllUi();
+        Toast.makeText(this, R.string.live_rec_started_toast, Toast.LENGTH_SHORT).show();
+    }
+
+    private void stopLiveRecording(boolean showSummaryDialog)
+    {
+        boolean wasRecording = liveDataRecorder.isRecording();
+        liveDataRecorder.stop();
+        syncKeepScreenOnFlag();
+        updateMenuVisibility();
+        refreshAllUi();
+
+        if (!wasRecording)
+        {
+            return;
+        }
+
+        if (!liveDataRecorder.hasSamples())
+        {
+            if (showSummaryDialog)
+            {
+                Toast.makeText(this, R.string.live_rec_stopped_empty, Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        final String exportText = liveDataRecorder.buildFormattedLog(
+                getString(R.string.time),
+                getString(R.string.live_rec_col_sec));
+        saveRecordedCsvInBackground(exportText);
+
+        if (showSummaryDialog && !isFinishing())
+        {
+            showLiveRecordingFinishedDialog();
+        }
+    }
+
+    private void saveRecordedCsvInBackground(final String exportText)
+    {
+        if (exportText == null || exportText.isEmpty()) return;
+        executor.execute(() -> {
+            try
+            {
+                String dirPath = FileHelper.getPath(MainActivity.this) + File.separator + "csv";
+                File csvFile = new File(dirPath, "live_" + FileHelper.getFileName() + ".csv");
+                LiveDataRecorder.writeUtf8CsvFile(csvFile, exportText);
+                liveDataRecorder.setLastSavedFilePath(csvFile.getAbsolutePath());
+            } catch (Exception e)
+            {
+                log.log(Level.WARNING, "Failed to save live CSV backup", e);
+            }
+        });
+    }
+
+    private void copyLiveRecordingToClipboard()
+    {
+        if (!liveDataRecorder.hasSamples())
+        {
+            return;
+        }
+
+        String fullLog = liveDataRecorder.buildFormattedLog(
+                getString(R.string.time),
+                getString(R.string.live_rec_col_sec));
+        if (fullLog.isEmpty())
+        {
+            return;
+        }
+
+        String clipPayload = prepareClipboardPayload(fullLog, liveDataRecorder.getLastSavedFilePath());
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null)
+        {
+            return;
+        }
+
+        try
+        {
+            clipboard.setPrimaryClip(ClipData.newPlainText("AndrOBD2 Live Log", clipPayload));
+        } catch (RuntimeException ex)
+        {
+            // Fallback for devices with strict Binder transaction limits
+            int fallbackLimit = Math.min(clipPayload.length(), 150_000);
+            int lastNl = clipPayload.lastIndexOf('\n', fallbackLimit);
+            String safeSlice = lastNl > 0 ? clipPayload.substring(0, lastNl + 1) : clipPayload.substring(0, fallbackLimit);
+            clipboard.setPrimaryClip(ClipData.newPlainText("AndrOBD2 Live Log", safeSlice));
+        }
+
+        Toast.makeText(this,
+                getString(R.string.live_rec_copied_toast_fmt,
+                        liveDataRecorder.getSampleCount(),
+                        liveDataRecorder.getParameterCount()),
+                Toast.LENGTH_LONG).show();
+    }
+
+    static String prepareClipboardPayload(String fullLog, String savedFilePath)
+    {
+        if (fullLog == null) return "";
+        if (fullLog.length() <= MAX_CLIPBOARD_CHARS)
+        {
+            return fullLog;
+        }
+        int cut = fullLog.lastIndexOf('\n', MAX_CLIPBOARD_CHARS - 256);
+        if (cut <= 0) cut = MAX_CLIPBOARD_CHARS - 256;
+        StringBuilder sb = new StringBuilder(cut + 200);
+        sb.append(fullLog, 0, cut).append('\n');
+        if (savedFilePath != null && !savedFilePath.isEmpty())
+        {
+            sb.append("# CSV: ").append(savedFilePath).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private void shareLiveRecording()
+    {
+        if (!liveDataRecorder.hasSamples()) return;
+
+        String fullLog = liveDataRecorder.buildFormattedLog(
+                getString(R.string.time),
+                getString(R.string.live_rec_col_sec));
+        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+        String savedPath = liveDataRecorder.getLastSavedFilePath();
+        if (savedPath != null && new File(savedPath).exists())
+        {
+            try
+            {
+                Uri uri = FileProvider.getUriForFile(
+                        this,
+                        getPackageName() + ".provider",
+                        new File(savedPath));
+                sendIntent.setType("text/csv");
+                sendIntent.putExtra(Intent.EXTRA_STREAM, uri);
+                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored)
+            {
+                sendIntent.setType("text/plain");
+            }
+        } else
+        {
+            sendIntent.setType("text/plain");
+        }
+        sendIntent.putExtra(Intent.EXTRA_TEXT, prepareClipboardPayload(fullLog, savedPath));
+        startActivity(Intent.createChooser(sendIntent, getString(R.string.share)));
+    }
+
+    private void showLiveRecordingFinishedDialog()
+    {
+        String durationStr = LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds());
+        String summaryMsg = getString(
+                R.string.live_rec_done_summary_fmt,
+                durationStr,
+                liveDataRecorder.getSampleCount(),
+                liveDataRecorder.getParameterCount(),
+                liveDataRecorder.buildShortPreview(6));
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.live_rec_done_title)
+                .setMessage(summaryMsg)
+                .setPositiveButton(R.string.live_rec_copy_all, (dialog, which) -> copyLiveRecordingToClipboard())
+                .setNeutralButton(R.string.share, (dialog, which) -> shareLiveRecording())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void refreshLiveRecorderUi()
+    {
+        if (mListView == null) return;
+
+        View btnRecord = mListView.findViewById(R.id.btn_live_record);
+        ImageView ivRecordIcon = mListView.findViewById(R.id.iv_live_record_icon);
+        TextView tvRecordLabel = mListView.findViewById(R.id.tv_live_record_label);
+
+        View btnCopy = mListView.findViewById(R.id.btn_copy_live_record);
+        TextView tvCopyLabel = mListView.findViewById(R.id.tv_copy_record_label);
+
+        boolean isRec = liveDataRecorder.isRecording();
+        boolean hasData = liveDataRecorder.hasSamples();
+        int sampleCount = liveDataRecorder.getSampleCount();
+
+        if (btnRecord != null && ivRecordIcon != null && tvRecordLabel != null)
+        {
+            if (isRec)
+            {
+                btnRecord.setBackgroundResource(R.drawable.bg_btn_danger_soft);
+                ivRecordIcon.setImageResource(R.drawable.ic_stop_square);
+                ivRecordIcon.setColorFilter(ContextCompat.getColor(this, R.color.status_danger));
+                tvRecordLabel.setTextColor(ContextCompat.getColor(this, R.color.status_danger));
+                String mmSs = LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds());
+                tvRecordLabel.setText(getString(R.string.live_rec_stop_fmt, mmSs, sampleCount));
+            } else
+            {
+                btnRecord.setBackgroundResource(R.drawable.bg_btn_secondary);
+                ivRecordIcon.setImageResource(R.drawable.ic_record_dot);
+                ivRecordIcon.clearColorFilter();
+                tvRecordLabel.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+                tvRecordLabel.setText(R.string.live_rec_start);
+            }
+        }
+
+        if (btnCopy != null && tvCopyLabel != null)
+        {
+            if (hasData && !isRec)
+            {
+                btnCopy.setVisibility(View.VISIBLE);
+                tvCopyLabel.setText(getString(R.string.live_rec_copy_fmt, sampleCount));
+            } else
+            {
+                btnCopy.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    private void syncKeepScreenOnFlag()
+    {
+        boolean keepOn = liveDataRecorder.isRecording()
+                || (prefs != null && prefs.getBoolean(KEEP_SCREEN_ON, false));
+        if (keepOn)
+        {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else
+        {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
     @Override
     public void onStart()
     {
@@ -1478,6 +1784,7 @@ public class MainActivity extends PluginManager
         {
             updateTimer.cancel();
         }
+        liveDataRecorder.setOnTickListener(null);
         ModernUiUtils.optimizeListView(getListView());
     }
 
@@ -1485,6 +1792,9 @@ public class MainActivity extends PluginManager
     protected void onResume()
     {
         SettingsActivity.applyLocale(this);
+
+        liveDataRecorder.setOnTickListener(this::refreshLiveRecorderUi);
+        syncKeepScreenOnFlag();
 
         updateTimer = new Timer();
         final TimerTask updateTask = new TimerTask()
@@ -1507,6 +1817,11 @@ public class MainActivity extends PluginManager
     protected void onDestroy()
     {
         setAutoHider(false);
+        liveDataRecorder.setOnTickListener(null);
+        if (isFinishing() && liveDataRecorder.isRecording())
+        {
+            liveDataRecorder.stop();
+        }
 
         try
         {
@@ -1670,6 +1985,12 @@ public class MainActivity extends PluginManager
         if (id == R.id.plugin_manager)
         {
             setManagerView();
+            return true;
+        }
+
+        if (id == R.id.copy_live_recording)
+        {
+            copyLiveRecordingToClipboard();
             return true;
         }
 
@@ -1876,13 +2197,7 @@ public class MainActivity extends PluginManager
     {
         if (key == null || KEEP_SCREEN_ON.equals(key))
         {
-            if (prefs.getBoolean(KEEP_SCREEN_ON, false))
-            {
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            } else
-            {
-                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            }
+            syncKeepScreenOnFlag();
         }
 
         if (key == null || PREF_FULLSCREEN.equals(key))
@@ -2351,6 +2666,8 @@ public class MainActivity extends PluginManager
                 setMenuItemEnable(R.id.obd_services, true);
                 break;
         }
+        setMenuItemVisible(R.id.copy_live_recording,
+                liveDataRecorder.hasSamples() && !liveDataRecorder.isRecording());
     }
 
     private void setAutoHider(boolean active)
@@ -2411,6 +2728,12 @@ public class MainActivity extends PluginManager
     {
         if (newMode != this.mode || newMode == MODE.FILE)
         {
+            if ((newMode == MODE.OFFLINE || newMode == MODE.FILE)
+                    && liveDataRecorder.isRecording())
+            {
+                stopLiveRecording(false);
+            }
+
             if (newMode != MODE.DEMO)
             {
                 stopDemoService();
