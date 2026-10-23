@@ -37,7 +37,7 @@
     <string name="load">Загрузить измерение</string>
     <string name="saved_data">Сохраненные данные</string>
     <string name="dashboard">Приборная панель</string>
-    <string name="hud">Главный экран</string>
+    <string name="hud">Проекция HUD</string>
     <string name="filter">Выбранный фильтр</string>
     <string name="measure_system_description">Система измерения (метрическая / имперская)</string>
     <string name="measure_system">Единицы измерения</string>
@@ -290,5 +290,11 @@
     <string name="chart_win_all">Все</string>
     <string name="chart_pause">Пауза</string>
     <string name="chart_resume">Live</string>
-    <string name="chart_touch_hint">Проведите пальцем по графику для точных значений · Нажмите карточку сверху, чтобы скрыть линию</string>
+    <string name="chart_touch_hint">Касание графика — точные значения · Нажатие на легенду — скрыть линию</string>
+    <string name="dashboard_short">Приборы</string>
+    <string name="select_all_items">Выбрать все</string>
+    <string name="hud_mirror_toggle">Зеркало</string>
+    <string name="range_min_label">Мин.</string>
+    <string name="range_max_label">Макс.</string>
+    <string name="session_status_label">СОСТОЯНИЕ СВЯЗИ</string>
 </resources>

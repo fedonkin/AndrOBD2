@@ -66,7 +66,9 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         final View itemAccent;
         final ImageView ivIcon;
         final TextView tvDescr;
+        final TextView tvValueWide;
         final TextView tvSublabel;
+        final View valueColumn;
         final TextView tvValue;
         final TextView tvUnits;
         final ImageView ivFavStar;
@@ -77,7 +79,9 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             itemAccent = convertView.findViewById(R.id.item_accent);
             ivIcon = convertView.findViewById(R.id.obd_icon);
             tvDescr = convertView.findViewById(R.id.obd_label);
+            tvValueWide = convertView.findViewById(R.id.obd_value_wide);
             tvSublabel = convertView.findViewById(R.id.obd_sublabel);
+            valueColumn = convertView.findViewById(R.id.value_column);
             tvValue = convertView.findViewById(R.id.obd_value);
             tvUnits = convertView.findViewById(R.id.obd_units);
             ivFavStar = convertView.findViewById(R.id.iv_fav_star);
@@ -412,20 +416,39 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             holder.progressBar.setVisibility(ProgressBar.GONE);
         }
 
-        holder.tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP,
-                (!(colVal instanceof Number) && fmtText.length() > 10) ? 14f : 19f);
-        holder.tvValue.setText(fmtText);
-
         String units = (currPv instanceof EcuDataPv)
                 ? ((EcuDataPv) currPv).getUnits()
                 : (currPv.get(EcuDataPv.FID_UNITS) != null ? String.valueOf(currPv.get(EcuDataPv.FID_UNITS)) : "");
-        if (units != null && !units.trim().isEmpty())
+        boolean hasUnits = units != null && !units.trim().isEmpty();
+
+        boolean useWideTextRow = !(colVal instanceof Number)
+                && fmtText != null
+                && fmtText.length() > 10;
+
+        if (useWideTextRow)
         {
-            holder.tvUnits.setText(units);
-            holder.tvUnits.setVisibility(View.VISIBLE);
+            if (holder.valueColumn != null) holder.valueColumn.setVisibility(View.GONE);
+            if (holder.tvValueWide != null)
+            {
+                String fullWide = hasUnits ? (fmtText + " " + units.trim()) : fmtText;
+                holder.tvValueWide.setText(fullWide);
+                holder.tvValueWide.setVisibility(View.VISIBLE);
+            }
         } else
         {
-            holder.tvUnits.setVisibility(View.GONE);
+            if (holder.tvValueWide != null) holder.tvValueWide.setVisibility(View.GONE);
+            if (holder.valueColumn != null) holder.valueColumn.setVisibility(View.VISIBLE);
+            holder.tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+            holder.tvValue.setText(fmtText);
+
+            if (hasUnits)
+            {
+                holder.tvUnits.setText(units);
+                holder.tvUnits.setVisibility(View.VISIBLE);
+            } else
+            {
+                holder.tvUnits.setVisibility(View.GONE);
+            }
         }
 
         if (holder.ivFavStar != null)

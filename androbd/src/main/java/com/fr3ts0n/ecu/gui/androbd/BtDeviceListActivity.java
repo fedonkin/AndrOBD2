@@ -133,6 +133,8 @@ public class BtDeviceListActivity extends AppCompatActivity
 
 		setResult(RESULT_CANCELED);
 		setContentView(R.layout.device_list);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+		ModernUiUtils.enableActionBarUp(this);
 
 		mBtAdapter = BluetoothAdapter.getDefaultAdapter();
 
@@ -158,6 +160,13 @@ public class BtDeviceListActivity extends AppCompatActivity
 	protected boolean useClassicDiscovery()
 	{
 		return getClass() == BtDeviceListActivity.class;
+	}
+
+	@Override
+	public boolean onSupportNavigateUp()
+	{
+		finish();
+		return true;
 	}
 
 	private void registerClassicDiscoveryIfNeeded()

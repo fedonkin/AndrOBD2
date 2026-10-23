@@ -68,6 +68,7 @@ public class ModernChartView extends View
     private float scrubFraction = -1f; // -1 = inactive, 0..1 = active crosshair position
 
     private float padLeft;
+    private float lastPlotLeft;
     private float padRight;
     private float padTop;
     private float padBottom;
@@ -95,6 +96,7 @@ public class ModernChartView extends View
     private void init(Context context)
     {
         padLeft = dp(48f);
+        lastPlotLeft = padLeft;
         padRight = dp(16f);
         padTop = dp(16f);
         padBottom = dp(28f);
@@ -204,7 +206,7 @@ public class ModernChartView extends View
     @Override
     public boolean onTouchEvent(MotionEvent event)
     {
-        float plotW = getWidth() - padLeft - padRight;
+        float plotW = getWidth() - lastPlotLeft - padRight;
         if (plotW <= 10f) return super.onTouchEvent(event);
 
         int action = event.getActionMasked();
@@ -214,7 +216,7 @@ public class ModernChartView extends View
             {
                 getParent().requestDisallowInterceptTouchEvent(true);
             }
-            float rel = (event.getX() - padLeft) / plotW;
+            float rel = (event.getX() - lastPlotLeft) / plotW;
             scrubFraction = Math.max(0f, Math.min(1f, rel));
             invalidate();
             return true;
@@ -229,13 +231,21 @@ public class ModernChartView extends View
 
         int w = getWidth();
         int h = getHeight();
-        float left = padLeft;
+        if (w <= 20 || h <= 20) return;
+
+        if (entries.isEmpty())
+        {
+            axisTextPaint.setTextAlign(Paint.Align.CENTER);
+            canvas.drawText(getContext().getString(R.string.no_numeric_items_yet),
+                    w / 2f, h / 2f, axisTextPaint);
+            return;
+        }
+
         float right = w - padRight;
         float top = padTop;
         float bottom = h - padBottom;
-        float plotW = right - left;
         float plotH = bottom - top;
-        if (plotW <= 10f || plotH <= 10f) return;
+        if (plotH <= 10f) return;
 
         // 1. Determine time bounds [minT, maxT]
         long globalEarliest = Long.MAX_VALUE;
@@ -310,7 +320,7 @@ public class ModernChartView extends View
             }
         }
 
-        // 3. Draw horizontal grid lines (4 divisions) & Y labels
+        // 3. Draw horizontal grid lines (4 divisions) & Y labels with dynamic left margin
         double singleMin = 0.0;
         double singleMax = 100.0;
         if (visibleSeriesCount == 1 && singleVisible != null && !Double.isNaN(singleVisible.windowMin))
@@ -321,22 +331,35 @@ public class ModernChartView extends View
             singleMax = singleVisible.windowMax + pad;
         }
 
+        String[] yLabels = new String[5];
+        float maxLabelW = 0f;
+        for (int g = 0; g <= 4; g++)
+        {
+            float frac = g / 4f;
+            if (visibleSeriesCount == 1 && singleVisible != null && !Double.isNaN(singleVisible.windowMin))
+            {
+                double val = singleMin + frac * (singleMax - singleMin);
+                yLabels[g] = formatCompactNumber(val);
+            } else
+            {
+                yLabels[g] = String.format(Locale.US, "%d%%", Math.round(frac * 100));
+            }
+            float lw = axisTextPaint.measureText(yLabels[g]);
+            if (lw > maxLabelW) maxLabelW = lw;
+        }
+
+        float left = Math.max(padLeft, maxLabelW + dp(14f));
+        lastPlotLeft = left;
+        float plotW = right - left;
+        if (plotW <= 10f) return;
+
         axisTextPaint.setTextAlign(Paint.Align.RIGHT);
         for (int g = 0; g <= 4; g++)
         {
             float frac = g / 4f;
             float y = bottom - frac * plotH;
             canvas.drawLine(left, y, right, y, gridPaint);
-            String yLabel;
-            if (visibleSeriesCount == 1 && singleVisible != null && !Double.isNaN(singleVisible.windowMin))
-            {
-                double val = singleMin + frac * (singleMax - singleMin);
-                yLabel = formatCompactNumber(val);
-            } else
-            {
-                yLabel = String.format(Locale.US, "%d%%", Math.round(frac * 100));
-            }
-            canvas.drawText(yLabel, left - dp(6f), y + dp(3.5f), axisTextPaint);
+            canvas.drawText(yLabels[g], left - dp(6f), y + dp(3.5f), axisTextPaint);
         }
 
         // 4. Draw vertical time grid lines (4 intervals)

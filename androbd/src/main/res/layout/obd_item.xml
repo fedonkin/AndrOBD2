@@ -10,22 +10,22 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="14dp"
+        android:paddingStart="12dp"
         android:paddingEnd="10dp"
-        android:paddingTop="11dp"
-        android:paddingBottom="10dp">
+        android:paddingTop="10dp"
+        android:paddingBottom="9dp">
 
         <View
             android:id="@+id/item_accent"
-            android:layout_width="4dp"
-            android:layout_height="34dp"
-            android:layout_marginEnd="12dp"
+            android:layout_width="3dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="11dp"
             android:background="@drawable/bg_accent_bar" />
 
         <ImageView
             android:id="@+id/obd_icon"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:layout_marginEnd="10dp"
             android:contentDescription="@string/obd_codes"
             android:src="@drawable/ic_code"
@@ -34,8 +34,8 @@
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:layout_marginEnd="10dp"
             android:orientation="vertical">
 
             <TextView
@@ -46,7 +46,19 @@
                 android:lineSpacingExtra="1dp"
                 android:maxLines="2"
                 android:textColor="@color/text_primary"
-                android:textSize="14sp" />
+                android:textSize="13.5sp" />
+
+            <!-- Full-width readable value for long text strings (VIN, Calibration ID, Fuel Status) -->
+            <TextView
+                android:id="@+id/obd_value_wide"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:fontFeatureSettings="tnum"
+                android:textColor="@color/text_primary"
+                android:textSize="13.5sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/obd_sublabel"
@@ -61,10 +73,11 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/value_column"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="end"
-            android:minWidth="56dp"
+            android:minWidth="52dp"
             android:orientation="vertical">
 
             <TextView
@@ -75,7 +88,7 @@
                 android:gravity="end"
                 android:maxLines="1"
                 android:textColor="@color/text_primary"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -93,7 +106,7 @@
             android:id="@+id/iv_fav_star"
             android:layout_width="34dp"
             android:layout_height="34dp"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="4dp"
             android:contentDescription="@string/fav_toggle_desc"
             android:padding="7dp"
             android:src="@drawable/ic_star_outline"
@@ -104,10 +117,10 @@
         android:id="@+id/bar"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
-        android:layout_height="3dp"
-        android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp"
-        android:layout_marginBottom="9dp"
+        android:layout_height="2.5dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="8dp"
         android:max="100"
         android:progressDrawable="@drawable/bg_progress_bar"
         android:visibility="gone" />

@@ -23,7 +23,6 @@ import static android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.SearchManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -68,6 +67,7 @@ import android.window.OnBackInvokedCallback;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -865,21 +865,41 @@ public class MainActivity extends PluginManager
         }
         int currentPort = getPrefsInt(DEVICE_PORT, DEFAULT_WIFI_PORT);
 
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        float density = getResources().getDisplayMetrics().density;
+        int padH = Math.round(20 * density);
+        int padV = Math.round(10 * density);
+        int fieldPadH = Math.round(12 * density);
+        int fieldPadV = Math.round(9 * density);
+
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
-        container.setPadding(pad, pad / 2, pad, 0);
+        container.setPadding(padH, padV, padH, Math.round(4 * density));
 
         final EditText etIp = new EditText(this);
         etIp.setHint(R.string.device_address);
         etIp.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        etIp.setSingleLine(true);
+        etIp.setBackgroundResource(R.drawable.bg_search_box);
+        etIp.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        etIp.setHintTextColor(ContextCompat.getColor(this, R.color.text_tertiary));
+        etIp.setPadding(fieldPadH, fieldPadV, fieldPadH, fieldPadV);
         etIp.setText(currentIp);
         container.addView(etIp);
 
         final EditText etPort = new EditText(this);
         etPort.setHint(R.string.device_port);
         etPort.setInputType(InputType.TYPE_CLASS_NUMBER);
+        etPort.setSingleLine(true);
+        etPort.setBackgroundResource(R.drawable.bg_search_box);
+        etPort.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        etPort.setHintTextColor(ContextCompat.getColor(this, R.color.text_tertiary));
+        etPort.setPadding(fieldPadH, fieldPadV, fieldPadH, fieldPadV);
         etPort.setText(String.valueOf(currentPort));
+        LinearLayout.LayoutParams portLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        portLp.topMargin = padV;
+        etPort.setLayoutParams(portLp);
         container.addView(etPort);
 
         new AlertDialog.Builder(this)
@@ -950,6 +970,7 @@ public class MainActivity extends PluginManager
         final ActionBar ab = getSupportActionBar();
         if (ab != null)
         {
+            ab.setDisplayHomeAsUpEnabled(false);
             ab.setTitle(R.string.app_name);
         }
     }
@@ -2238,9 +2259,34 @@ public class MainActivity extends PluginManager
     public void setContentView(View view)
     {
         super.setContentView(view);
+        ModernUiUtils.applyEdgeToEdgeInsets(this);
+        applyOrientationDensityAdjustments(getResources().getConfiguration());
         if (getListView() != null)
         {
             getListView().setOnTouchListener(toolbarAutoHider);
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull android.content.res.Configuration newConfig)
+    {
+        super.onConfigurationChanged(newConfig);
+        ModernUiUtils.applyEdgeToEdgeInsets(this);
+        applyOrientationDensityAdjustments(newConfig);
+    }
+
+    private void applyOrientationDensityAdjustments(android.content.res.Configuration config)
+    {
+        if (mListView == null || config == null) return;
+        View controlBar = mListView.findViewById(R.id.data_header_panel);
+        if (controlBar != null)
+        {
+            float d = getResources().getDisplayMetrics().density;
+            boolean shortScreen = config.screenHeightDp > 0 && config.screenHeightDp < 440;
+            int hPad = Math.round(12 * d);
+            int topPad = Math.round((shortScreen ? 5 : 8) * d);
+            int botPad = Math.round((shortScreen ? 4 : 8) * d);
+            controlBar.setPadding(hPad, topPad, hPad, botPad);
         }
     }
 
@@ -2300,6 +2346,12 @@ public class MainActivity extends PluginManager
     {
         int id = item.getItemId();
 
+        if (id == android.R.id.home)
+        {
+            onBackPressed();
+            return true;
+        }
+
         if (id == R.id.day_night_mode)
         {
             boolean currentlyDark = (getResources().getConfiguration().uiMode
@@ -2344,6 +2396,12 @@ public class MainActivity extends PluginManager
         if (id == R.id.plugin_manager)
         {
             setManagerView();
+            final ActionBar ab = getSupportActionBar();
+            if (ab != null)
+            {
+                ab.setDisplayHomeAsUpEnabled(true);
+                ab.setTitle(R.string.plugin_manager);
+            }
             return true;
         }
 
@@ -3374,6 +3432,7 @@ public class MainActivity extends PluginManager
             final ActionBar ab = getSupportActionBar();
             if (ab != null)
             {
+                ab.setDisplayHomeAsUpEnabled(false);
                 ab.setTitle(getString(R.string.app_name));
             }
             return;
@@ -3385,9 +3444,13 @@ public class MainActivity extends PluginManager
         getListView().setChoiceMode(ListView.CHOICE_MODE_SINGLE);
 
         final ActionBar ab = getSupportActionBar();
-        if (ab != null && menuTitle != null)
+        if (ab != null)
         {
-            ab.setTitle(menuTitle);
+            ab.setDisplayHomeAsUpEnabled(true);
+            if (menuTitle != null)
+            {
+                ab.setTitle(menuTitle);
+            }
         }
 
         CommService.elm.setService(newObdService,

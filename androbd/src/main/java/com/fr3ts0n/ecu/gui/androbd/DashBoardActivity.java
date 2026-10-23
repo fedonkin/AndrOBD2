@@ -51,15 +51,13 @@ import java.util.Objects;
 import java.util.TreeSet;
 
 /**
- * Display selected Live Data items as modern Dashboard gauges or windshield Head-Up Display (HUD).
+ * Display selected Live Data items as responsive Dashboard gauges or windshield Head-Up Display (HUD).
  */
 public class DashBoardActivity extends AppCompatActivity
 		implements PvChangeListener, ObdGaugeAdapter.OnItemLongClickListener
 {
 	public static final String POSITIONS = "POSITIONS";
 	public static final String RES_ID = "RES_ID";
-
-	private static int MIN_GAUGE_SIZE = 300;
 
 	private PowerManager.WakeLock wakeLock;
 	private transient ObdGaugeAdapter adapter;
@@ -74,12 +72,6 @@ public class DashBoardActivity extends AppCompatActivity
 	private static ListAdapter mAdapter = null;
 	private static final DisplayMetrics metrics = new DisplayMetrics();
 	private transient int[] positions;
-
-	private static final int[][] rowCols =
-	{
-		{1, 1}, {1, 1}, {2, 1}, {2, 2}, {2, 2}, {3, 2}, {3, 2}, {4, 2}, {4, 2}, {3, 3},
-		{4, 3}, {4, 3}, {4, 3}, {4, 4}, {4, 4}, {4, 4}, {4, 4}, {5, 4}, {5, 4}, {5, 4}, {5, 4}
-	};
 
 	public static ListAdapter getAdapter()
 	{
@@ -106,7 +98,7 @@ public class DashBoardActivity extends AppCompatActivity
 					Object rawVal = currPv.get(EcuDataPv.FID_VALUE);
 					if (gauge != null && rawVal instanceof Number)
 					{
-						gauge.speedTo(((Number) rawVal).floatValue());
+						gauge.speedTo(((Number) rawVal).floatValue(), 300);
 					}
 				}
 			}
@@ -130,45 +122,58 @@ public class DashBoardActivity extends AppCompatActivity
 	void updateDashboardScaling()
 	{
 		getWindowManager().getDefaultDisplay().getMetrics(metrics);
-		MIN_GAUGE_SIZE = Math.min(metrics.densityDpi * 15 / 10,
-				Math.min(metrics.widthPixels, metrics.heightPixels));
-
-		int height = metrics.heightPixels;
-		int width = metrics.widthPixels;
-		if (positions == null || positions.length == 0 || mAdapter == null)
-		{
-			return;
-		}
-		int numColumns = Math.max(1, Math.min(positions.length, width / MIN_GAUGE_SIZE));
-		int numRows = Math.max(1, Math.min(positions.length, height / MIN_GAUGE_SIZE));
-
-		if (positions.length < rowCols.length && positions.length < numColumns * numRows)
-		{
-			numColumns = rowCols[positions.length][(width > height) ? 0 : 1];
-		}
-		gridLayoutManager.setSpanCount(Math.max(1, numColumns));
+		float density = Math.max(1f, metrics.density);
+		float widthDp = metrics.widthPixels / density;
 
 		detachPvListeners();
 		adapter.clear();
 		pidNumbers.clear();
 
-		for (int position : positions)
+		if (positions != null && mAdapter != null)
 		{
-			if (position < 0 || position >= mAdapter.getCount()) continue;
-			Object item = mAdapter.getItem(position);
-			if (!(item instanceof EcuDataPv)) continue;
-			EcuDataPv currPv = (EcuDataPv) item;
-
-			int pid = currPv.getAsInt(EcuDataPv.FID_PID);
-			if (pid > 0)
+			for (int position : positions)
 			{
-				pidNumbers.add(pid);
+				if (position < 0 || position >= mAdapter.getCount()) continue;
+				Object item = mAdapter.getItem(position);
+				if (!(item instanceof EcuDataPv)) continue;
+				EcuDataPv currPv = (EcuDataPv) item;
+
+				int pid = currPv.getAsInt(EcuDataPv.FID_PID);
+				if (pid > 0)
+				{
+					pidNumbers.add(pid);
+				}
+				adapter.add(currPv);
+				currPv.addPvChangeListener(this, PvChangeEvent.PV_MODIFIED);
+				observedPvs.add(currPv);
 			}
-			adapter.add(currPv);
-			currPv.addPvChangeListener(this, PvChangeEvent.PV_MODIFIED);
-			observedPvs.add(currPv);
 		}
+
+		int count = adapter.getItemCount();
+		int numColumns;
+		if (count <= 1)
+		{
+			numColumns = 1;
+		} else if (widthDp < 520f)
+		{
+			numColumns = (count == 2) ? 1 : 2;
+		} else if (widthDp < 840f)
+		{
+			numColumns = Math.min(count, (count <= 4) ? 2 : 3);
+		} else
+		{
+			numColumns = Math.min(count, 4);
+		}
+
+		gridLayoutManager.setSpanCount(Math.max(1, numColumns));
+		adapter.setColumnWidthDp((widthDp - 16f) / Math.max(1, numColumns));
 		grid.setAdapter(adapter);
+
+		View tvEmpty = findViewById(R.id.tv_dashboard_empty);
+		if (tvEmpty != null)
+		{
+			tvEmpty.setVisibility(count == 0 ? View.VISIBLE : View.GONE);
+		}
 	}
 
 	@SuppressLint("WakelockTimeout")
@@ -178,7 +183,10 @@ public class DashBoardActivity extends AppCompatActivity
 		SettingsActivity.applyLocale(this);
 		super.onCreate(savedInstanceState);
 
-		getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		if (MainActivity.prefs != null && MainActivity.prefs.getBoolean(MainActivity.PREF_FULLSCREEN, false))
+		{
+			getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		}
 
 		if (MainActivity.prefs != null && MainActivity.prefs.getBoolean("keep_screen_on", false))
 		{
@@ -196,11 +204,24 @@ public class DashBoardActivity extends AppCompatActivity
 
 		int resId = getIntent().getIntExtra(RES_ID, R.layout.dashboard);
 		setContentView(resId);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
 
 		View btnBack = findViewById(R.id.btn_dashboard_back);
 		if (btnBack != null)
 		{
 			btnBack.setOnClickListener(v -> finish());
+		}
+
+		final MirrorRelativeLayout hudMirror = findViewById(R.id.hud_mirror_container);
+		final View btnMirror = findViewById(R.id.btn_hud_mirror);
+		if (hudMirror != null && btnMirror != null)
+		{
+			btnMirror.setSelected(hudMirror.isMirrored());
+			btnMirror.setOnClickListener(v -> {
+				boolean next = !hudMirror.isMirrored();
+				hudMirror.setMirrored(next);
+				btnMirror.setSelected(next);
+			});
 		}
 
 		grid = findViewById(R.id.dashboardGrid);

@@ -108,6 +108,15 @@ public class SettingsActivity extends AppCompatActivity
 		// Apply locale before calling super.onCreate()
 		applyLocale(this);
 		super.onCreate(savedInstanceState);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+		ModernUiUtils.enableActionBarUp(this);
+
+		getSupportFragmentManager().addOnBackStackChangedListener(() -> {
+			if (getSupportFragmentManager().getBackStackEntryCount() == 0)
+			{
+				setTitle(R.string.settings);
+			}
+		});
 
 		if (savedInstanceState == null)
 		{
@@ -116,6 +125,18 @@ public class SettingsActivity extends AppCompatActivity
 				.replace(android.R.id.content, new SettingsFragment())
 				.commit();
 		}
+	}
+
+	@Override
+	public boolean onSupportNavigateUp()
+	{
+		if (getSupportFragmentManager().getBackStackEntryCount() > 0)
+		{
+			getSupportFragmentManager().popBackStack();
+			return true;
+		}
+		finish();
+		return true;
 	}
 
 	/**
@@ -131,6 +152,11 @@ public class SettingsActivity extends AppCompatActivity
 		Bundle args = new Bundle();
 		args.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT, pref.getKey());
 		fragment.setArguments(args);
+
+		if (pref.getTitle() != null)
+		{
+			setTitle(pref.getTitle());
+		}
 
 		getSupportFragmentManager()
 			.beginTransaction()
@@ -235,47 +261,8 @@ public class SettingsActivity extends AppCompatActivity
 		public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState)
 		{
 			super.onViewCreated(view, savedInstanceState);
-			view.post(() -> fixUnpaddedListContainer(view));
-		}
-
-		private void fixUnpaddedListContainer(@NonNull View fragmentView)
-		{
-			View listContainer = fragmentView.findViewById(android.R.id.list_container);
-			if (listContainer == null) return;
-
-			int statusBarHeight = 0;
-			WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(fragmentView);
-			if (insets != null)
-			{
-				statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
-			}
-
-			int actionBarHeight = 0;
-			if (requireActivity() instanceof AppCompatActivity)
-			{
-				ActionBar actionBar = ((AppCompatActivity) requireActivity()).getSupportActionBar();
-				if (actionBar != null)
-				{
-					actionBarHeight = actionBar.getHeight();
-				}
-			}
-			int expectedTop = statusBarHeight + actionBarHeight;
-
-			int[] screenLocation = new int[2];
-			listContainer.getLocationOnScreen(screenLocation);
-			int actualTop = screenLocation[1];
-
-			// Comfortably below "unpadded" (0) but still well short of the correct offset -
-			// avoids both a false negative from minor measurement variance and a false
-			// positive that would double-pad an already-correct layout.
-			if (actualTop < statusBarHeight)
-			{
-				listContainer.setPadding(
-					listContainer.getPaddingLeft(),
-					listContainer.getPaddingTop() + (expectedTop - actualTop),
-					listContainer.getPaddingRight(),
-					listContainer.getPaddingBottom());
-			}
+			view.setBackgroundColor(androidx.core.content.ContextCompat.getColor(
+				requireContext(), R.color.bg_screen));
 		}
 
 		/**

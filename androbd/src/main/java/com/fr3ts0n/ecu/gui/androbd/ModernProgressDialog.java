@@ -18,75 +18,97 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
-import android.app.AlertDialog;
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.ProgressBar;
+import android.view.Window;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+
 /**
- * Modern replacement for deprecated ProgressDialog
- * Compatible with Android 4.1+ while providing better UX
+ * Modern replacement for deprecated ProgressDialog using strict single-card dialog styling.
  */
-public class ModernProgressDialog {
-    
-    private AlertDialog dialog;
-    private TextView messageView;
-    private TextView titleView;
-    
-    private ModernProgressDialog(Context context) {
-        // Inflate custom layout
+public class ModernProgressDialog
+{
+    private final AlertDialog dialog;
+    private final TextView messageView;
+    private final TextView titleView;
+
+    private ModernProgressDialog(Context context)
+    {
         LayoutInflater inflater = LayoutInflater.from(context);
         View dialogView = inflater.inflate(R.layout.modern_progress_dialog, null);
-        
+
         titleView = dialogView.findViewById(R.id.progress_title);
         messageView = dialogView.findViewById(R.id.progress_message);
-        
-        // Create dialog
+
         dialog = new AlertDialog.Builder(context)
-            .setView(dialogView)
-            .setCancelable(false)
-            .create();
+                .setView(dialogView)
+                .setCancelable(false)
+                .create();
+
+        Window win = dialog.getWindow();
+        if (win != null)
+        {
+            win.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
     }
-    
+
     /**
      * Show a progress dialog with title and message
      */
-    public static ModernProgressDialog show(Context context, String title, String message, boolean indeterminate) {
+    public static ModernProgressDialog show(Context context, String title, String message, boolean indeterminate)
+    {
         ModernProgressDialog progressDialog = new ModernProgressDialog(context);
         progressDialog.setTitle(title);
         progressDialog.setMessage(message);
         progressDialog.show();
         return progressDialog;
     }
-    
-    public void setTitle(String title) {
-        if (titleView != null) {
+
+    public void setTitle(String title)
+    {
+        if (titleView != null)
+        {
             titleView.setText(title);
             titleView.setVisibility(title != null && !title.isEmpty() ? View.VISIBLE : View.GONE);
         }
     }
-    
-    public void setMessage(String message) {
-        if (messageView != null) {
+
+    public void setMessage(String message)
+    {
+        if (messageView != null)
+        {
             messageView.setText(message);
         }
     }
-    
-    public void show() {
-        if (dialog != null && !dialog.isShowing()) {
+
+    public void show()
+    {
+        if (dialog != null && !dialog.isShowing())
+        {
             dialog.show();
+            Window win = dialog.getWindow();
+            if (win != null)
+            {
+                win.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            }
         }
     }
-    
-    public void dismiss() {
-        if (dialog != null && dialog.isShowing()) {
+
+    public void dismiss()
+    {
+        if (dialog != null && dialog.isShowing())
+        {
             dialog.dismiss();
         }
     }
-    
-    public boolean isShowing() {
+
+    public boolean isShowing()
+    {
         return dialog != null && dialog.isShowing();
     }
 }

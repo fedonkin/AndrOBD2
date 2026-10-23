@@ -474,5 +474,11 @@ period of time while the ECU recalibrates itself.
     <string name="chart_win_all">All</string>
     <string name="chart_pause">Pause</string>
     <string name="chart_resume">Live</string>
-    <string name="chart_touch_hint">Drag finger across chart for exact values · Tap top card to hide/show curve</string>
+    <string name="chart_touch_hint">Drag across chart to inspect values · Tap legend card to toggle series</string>
+    <string name="dashboard_short">Gauges</string>
+    <string name="select_all_items">Select all</string>
+    <string name="hud_mirror_toggle">Mirror</string>
+    <string name="range_min_label">Min</string>
+    <string name="range_max_label">Max</string>
+    <string name="session_status_label">CONNECTION</string>
 </resources>

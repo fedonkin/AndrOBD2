@@ -6,7 +6,7 @@
     android:background="@color/bg_screen"
     android:orientation="vertical">
 
-    <!-- Top Chart Controls Bar -->
+    <!-- Strict Responsive Chart Header (never clips on 320dp-360dp portrait phones) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -26,6 +26,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
+            android:maxLines="1"
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
             android:text="@string/back_action"
@@ -33,78 +34,95 @@
             android:textSize="12sp"
             android:textStyle="bold" />
 
-        <LinearLayout
+        <!-- Scroll-safe Segmented Time Window Selector -->
+        <HorizontalScrollView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"
-            android:gravity="center"
-            android:orientation="horizontal">
+            android:fillViewport="true"
+            android:scrollbars="none">
 
-            <TextView
-                android:id="@+id/chip_win_30s"
+            <LinearLayout
                 android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="4dp"
-                android:background="@drawable/bg_chip_selector"
-                android:clickable="true"
-                android:focusable="true"
+                android:layout_height="wrap_content"
                 android:gravity="center"
-                android:paddingStart="9dp"
-                android:paddingEnd="9dp"
-                android:text="@string/chart_win_30s"
-                android:textColor="@color/chip_text_color"
-                android:textSize="11sp"
-                android:textStyle="bold" />
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/chip_win_2m"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="4dp"
-                android:background="@drawable/bg_chip_selector"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:paddingStart="9dp"
-                android:paddingEnd="9dp"
-                android:text="@string/chart_win_2m"
-                android:textColor="@color/chip_text_color"
-                android:textSize="11sp"
-                android:textStyle="bold" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_segmented_group"
+                    android:orientation="horizontal"
+                    android:padding="2dp">
 
-            <TextView
-                android:id="@+id/chip_win_5m"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginEnd="4dp"
-                android:background="@drawable/bg_chip_selector"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:paddingStart="9dp"
-                android:paddingEnd="9dp"
-                android:text="@string/chart_win_5m"
-                android:textColor="@color/chip_text_color"
-                android:textSize="11sp"
-                android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/chip_win_30s"
+                        android:layout_width="wrap_content"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_segment_tab"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/chart_win_30s"
+                        android:textColor="@color/chip_text_color"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/chip_win_all"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:background="@drawable/bg_chip_selector"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:paddingStart="9dp"
-                android:paddingEnd="9dp"
-                android:text="@string/chart_win_all"
-                android:textColor="@color/chip_text_color"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+                    <TextView
+                        android:id="@+id/chip_win_2m"
+                        android:layout_width="wrap_content"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_segment_tab"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/chart_win_2m"
+                        android:textColor="@color/chip_text_color"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/chip_win_5m"
+                        android:layout_width="wrap_content"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_segment_tab"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/chart_win_5m"
+                        android:textColor="@color/chip_text_color"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/chip_win_all"
+                        android:layout_width="wrap_content"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_segment_tab"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/chart_win_all"
+                        android:textColor="@color/chip_text_color"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+        </HorizontalScrollView>
 
         <LinearLayout
             android:id="@+id/btn_chart_pause"
@@ -116,13 +134,13 @@
             android:focusable="true"
             android:gravity="center"
             android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+            android:paddingStart="9dp"
+            android:paddingEnd="9dp">
 
             <ImageView
                 android:id="@+id/iv_chart_pause"
-                android:layout_width="13dp"
-                android:layout_height="13dp"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
                 android:contentDescription="@string/chart_pause"
                 android:src="@drawable/ic_pause"
                 app:tint="@color/text_primary" />
@@ -132,6 +150,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
+                android:maxLines="1"
                 android:text="@string/chart_pause"
                 android:textColor="@color/text_primary"
                 android:textSize="11sp"
@@ -144,8 +163,8 @@
             android:layout_height="32dp"
             android:background="@drawable/bg_btn_secondary"
             android:clickable="true"
-            android:focusable="true"
             android:contentDescription="@string/share"
+            android:focusable="true"
             android:padding="7dp"
             android:src="@drawable/ic_share"
             app:tint="@color/accent_primary" />
@@ -156,16 +175,16 @@
         android:layout_height="1dp"
         android:background="@color/stroke_card" />
 
-    <!-- Live Interactive Series Legend Strip (tap a card to show/hide curve) -->
+    <!-- Live Interactive Series Legend Strip -->
     <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/bg_surface"
-        android:scrollbars="none"
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
         android:paddingTop="6dp"
-        android:paddingBottom="6dp">
+        android:paddingBottom="6dp"
+        android:scrollbars="none">
 
         <LinearLayout
             android:id="@+id/chart_legend_container"
@@ -186,13 +205,22 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/stroke_card" />
+
     <TextView
         android:id="@+id/tv_chart_touch_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/bg_surface"
+        android:ellipsize="end"
         android:gravity="center"
-        android:paddingTop="4dp"
+        android:maxLines="2"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="5dp"
         android:paddingBottom="6dp"
         android:text="@string/chart_touch_hint"
         android:textColor="@color/text_tertiary"

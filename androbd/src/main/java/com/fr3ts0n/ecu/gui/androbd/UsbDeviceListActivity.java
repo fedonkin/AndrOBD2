@@ -94,6 +94,8 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		SettingsActivity.applyLocale(this);
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.usb_list);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+		ModernUiUtils.enableActionBarUp(this);
 
 		mUsbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 		RecyclerView mListView = findViewById(R.id.deviceList);
@@ -104,6 +106,19 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		mEmptyStateView = findViewById(R.id.empty_state);
 		mEmptyStateView.setText(R.string.no_usb_devices_found);
 		mScanProgress = findViewById(R.id.scan_progress);
+
+		View btnRescan = findViewById(R.id.btn_rescan_usb);
+		if (btnRescan != null)
+		{
+			btnRescan.setOnClickListener(v -> refreshDeviceList());
+		}
+	}
+
+	@Override
+	public boolean onSupportNavigateUp()
+	{
+		finish();
+		return true;
 	}
 
 	@Override
@@ -162,7 +177,7 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 					device.getProductId());
 			final String subtitle = driver.getClass().getSimpleName();
 
-			holder.icon.setImageResource(R.drawable.ic_build);
+			holder.icon.setImageResource(R.drawable.ic_usb);
 			holder.title.setText(title);
 			holder.subtitle.setText(subtitle);
 			holder.badge.setText(R.string.medium_usb);

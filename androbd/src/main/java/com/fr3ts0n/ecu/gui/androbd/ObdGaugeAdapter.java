@@ -19,6 +19,7 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.content.Context;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -36,7 +37,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Adapter for OBD data gauge display in clean modern card containers.
+ * Adapter for OBD data gauge display in strict responsive card containers.
  */
 class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHolder>
 {
@@ -44,6 +45,7 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 	private final int resourceId;
 	private final List<EcuDataPv> items = new ArrayList<>();
 	private OnItemLongClickListener longClickListener;
+	private float columnWidthDp = 240f;
 
 	interface OnItemLongClickListener
 	{
@@ -67,6 +69,11 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 	{
 		this.context = context;
 		this.resourceId = resource;
+	}
+
+	void setColumnWidthDp(float widthDp)
+	{
+		this.columnWidthDp = Math.max(140f, widthDp);
 	}
 
 	void setOnItemLongClickListener(OnItemLongClickListener listener)
@@ -97,6 +104,12 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		notifyItemRangeRemoved(0, size);
 	}
 
+	private float sp(float v)
+	{
+		return TypedValue.applyDimension(
+				TypedValue.COMPLEX_UNIT_SP, v, context.getResources().getDisplayMetrics());
+	}
+
 	@Override
 	public int getItemCount()
 	{
@@ -122,6 +135,8 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 						&& longClickListener.onItemLongClick(holder.getBindingAdapterPosition()));
 
 		int pidColor = ColorAdapter.getItemColor(currPv);
+		boolean compact = columnWidthDp < 200f;
+		holder.tvDescr.setTextSize(TypedValue.COMPLEX_UNIT_SP, compact ? 11.5f : 13f);
 		holder.tvDescr.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
 
 		Number minValue = (Number) currPv.get(EcuDataPv.FID_MIN);
@@ -148,6 +163,11 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		holder.gauge.setUnitTextColor(
 				ContextCompat.getColor(context, R.color.text_secondary));
 
+		// Responsive typography so tick labels and center value never collide on 2-col narrow screens
+		holder.gauge.setSpeedTextSize(sp(compact ? 15f : 20f));
+		holder.gauge.setUnitTextSize(sp(compact ? 10f : 12f));
+		holder.gauge.setTextSize(sp(compact ? 9.5f : 11f));
+
 		String units = currPv.getUnits();
 		holder.gauge.setUnit(units != null ? units : "");
 		holder.gauge.setSpeedTextListener(aFloat -> {
@@ -165,6 +185,6 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 
 		holder.gauge.setMinSpeed(minValue.floatValue());
 		holder.gauge.setMaxSpeed(maxValue.floatValue());
-		holder.gauge.speedTo(value.floatValue());
+		holder.gauge.speedTo(value.floatValue(), 350);
 	}
 }

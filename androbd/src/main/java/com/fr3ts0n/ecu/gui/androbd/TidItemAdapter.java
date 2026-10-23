@@ -33,7 +33,7 @@ import com.fr3ts0n.pvs.PvList;
 import java.util.Collection;
 
 /**
- * Adapter to display OBD TID items from a process variable list
+ * Adapter to display OBD Test Control (TID) items from a process variable list.
  */
 public class TidItemAdapter extends ObdItemAdapter
 {
@@ -63,24 +63,29 @@ public class TidItemAdapter extends ObdItemAdapter
             return convertView;
         }
 
+        int accentColor = ContextCompat.getColor(getContext(), R.color.accent_primary);
         View itemAccent = convertView.findViewById(R.id.item_accent);
-        tintViewBackground(itemAccent, ContextCompat.getColor(getContext(), R.color.accent_primary));
+        tintViewBackground(itemAccent, accentColor);
 
         ImageView ivIcon = convertView.findViewById(R.id.obd_icon);
         ivIcon.setImageResource(R.drawable.ic_slideshow);
+        ivIcon.setColorFilter(accentColor);
         ivIcon.setVisibility(View.VISIBLE);
 
         TextView tvLabel = convertView.findViewById(R.id.obd_label);
         tvLabel.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
 
+        TextView tvValueWide = convertView.findViewById(R.id.obd_value_wide);
+        if (tvValueWide != null) tvValueWide.setVisibility(View.GONE);
+
         TextView tvSublabel = convertView.findViewById(R.id.obd_sublabel);
         if (tvSublabel != null) tvSublabel.setVisibility(View.GONE);
 
-        TextView tvValue = convertView.findViewById(R.id.obd_value);
-        tvValue.setVisibility(View.GONE);
+        View valueColumn = convertView.findViewById(R.id.value_column);
+        if (valueColumn != null) valueColumn.setVisibility(View.GONE);
 
-        TextView tvUnits = convertView.findViewById(R.id.obd_units);
-        tvUnits.setVisibility(View.GONE);
+        ImageView ivFavStar = convertView.findViewById(R.id.iv_fav_star);
+        if (ivFavStar != null) ivFavStar.setVisibility(View.GONE);
 
         ProgressBar bar = convertView.findViewById(R.id.bar);
         if (bar != null) bar.setVisibility(View.GONE);

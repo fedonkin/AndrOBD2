@@ -1,28 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_screen">#F3F5F9</color>
+    <color name="bg_screen">#EEF2F6</color>
     <color name="bg_surface">#FFFFFF</color>
-    <color name="bg_surface_elevated">#EDF1F7</color>
-    <color name="stroke_card">#DCE3EE</color>
+    <color name="bg_surface_elevated">#F4F7FA</color>
+    <color name="stroke_card">#D4DEE9</color>
 
-    <color name="text_primary">#0F172A</color>
-    <color name="text_secondary">#5B6B82</color>
-    <color name="text_tertiary">#8A99AF</color>
+    <color name="text_primary">#0B1324</color>
+    <color name="text_secondary">#475569</color>
+    <color name="text_tertiary">#758599</color>
 
-    <color name="accent_primary">#2563EB</color>
-    <color name="accent_primary_soft">#DBEAFE</color>
+    <color name="accent_primary">#1D4ED8</color>
+    <color name="accent_primary_soft">#E2ECFF</color>
     <color name="accent_on_primary">#FFFFFF</color>
 
-    <color name="status_online">#059669</color>
-    <color name="status_online_bg">#D1FAE5</color>
-    <color name="status_demo">#D97706</color>
+    <color name="status_online">#047857</color>
+    <color name="status_online_bg">#DCFCE7</color>
+    <color name="status_online_stroke">#A7F3D0</color>
+
+    <color name="status_demo">#B45309</color>
     <color name="status_demo_bg">#FEF3C7</color>
-    <color name="status_offline">#64748B</color>
-    <color name="status_offline_bg">#E2E8F0</color>
-    <color name="status_danger">#DC2626</color>
+    <color name="status_demo_stroke">#FDE68A</color>
+
+    <color name="status_offline">#475569</color>
+    <color name="status_offline_bg">#E6ECF4</color>
+    <color name="status_offline_stroke">#CBD5E1</color>
+
+    <color name="status_danger">#B91C1C</color>
     <color name="status_danger_bg">#FEE2E2</color>
+    <color name="status_danger_stroke">#FECACA</color>
 
     <color name="progress_track">#E2E8F0</color>
-    <color name="row_activated">#242563EB</color>
-    <color name="star_active">#F59E0B</color>
+    <color name="row_activated">#221D4ED8</color>
+    <color name="star_active">#D97706</color>
 </resources>

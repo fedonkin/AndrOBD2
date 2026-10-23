@@ -1,28 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_screen">#0B101B</color>
-    <color name="bg_surface">#141C2B</color>
-    <color name="bg_surface_elevated">#1E293B</color>
-    <color name="stroke_card">#27354C</color>
+    <color name="bg_screen">#090D14</color>
+    <color name="bg_surface">#111722</color>
+    <color name="bg_surface_elevated">#182130</color>
+    <color name="stroke_card">#243146</color>
 
-    <color name="text_primary">#F1F5F9</color>
-    <color name="text_secondary">#94A3B8</color>
-    <color name="text_tertiary">#64748B</color>
+    <color name="text_primary">#ECF2F8</color>
+    <color name="text_secondary">#93A4BC</color>
+    <color name="text_tertiary">#61738C</color>
 
     <color name="accent_primary">#3B82F6</color>
-    <color name="accent_primary_soft">#1E3A5F</color>
+    <color name="accent_primary_soft">#172B4D</color>
     <color name="accent_on_primary">#FFFFFF</color>
 
-    <color name="status_online">#34D399</color>
-    <color name="status_online_bg">#064E3B</color>
-    <color name="status_demo">#FBBF24</color>
-    <color name="status_demo_bg">#451A03</color>
-    <color name="status_offline">#94A3B8</color>
-    <color name="status_offline_bg">#1E293B</color>
-    <color name="status_danger">#F87171</color>
-    <color name="status_danger_bg">#450A0A</color>
+    <color name="status_online">#10B981</color>
+    <color name="status_online_bg">#082C22</color>
+    <color name="status_online_stroke">#0F513D</color>
 
-    <color name="progress_track">#223047</color>
+    <color name="status_demo">#F59E0B</color>
+    <color name="status_demo_bg">#2D1C06</color>
+    <color name="status_demo_stroke">#5C390B</color>
+
+    <color name="status_offline">#8B9BB4</color>
+    <color name="status_offline_bg">#182232</color>
+    <color name="status_offline_stroke">#27364E</color>
+
+    <color name="status_danger">#F87171</color>
+    <color name="status_danger_bg">#311013</color>
+    <color name="status_danger_stroke">#5C1D24</color>
+
+    <color name="progress_track">#1E293B</color>
     <color name="row_activated">#333B82F6</color>
     <color name="star_active">#FBBF24</color>
 </resources>

@@ -133,6 +133,7 @@ public class ChartActivity extends AppCompatActivity
 
         setTitle(R.string.chart);
         setContentView(R.layout.chart_activity);
+        ModernUiUtils.applyEdgeToEdgeInsets(this);
 
         doLiveUpdates = getIntent().getBooleanExtra(LIVE_UPDATE, false);
         int[] positions = getIntent().getIntArrayExtra(POSITIONS);

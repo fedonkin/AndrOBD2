@@ -3,21 +3,22 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="6dp"
+    android:layout_margin="5dp"
     android:background="@drawable/bg_card"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="10dp">
 
     <TextView
         android:id="@+id/label"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp"
+        android:layout_marginBottom="4dp"
         android:ellipsize="end"
         android:gravity="center_horizontal"
         android:maxLines="2"
+        android:minLines="1"
         android:textColor="@color/text_secondary"
-        android:textSize="13sp"
+        android:textSize="12.5sp"
         android:textStyle="bold" />
 
     <com.github.anastr.speedviewlib.AwesomeSpeedometer
@@ -26,7 +27,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center_horizontal"
         app:sv_backgroundCircleColor="@color/bg_surface_elevated"
-        app:sv_cutPadding="12dp"
+        app:sv_cutPadding="10dp"
         app:sv_indicatorColor="@color/accent_primary"
         app:sv_speedTextColor="@color/text_primary"
         app:sv_speedTextPosition="BOTTOM_CENTER"

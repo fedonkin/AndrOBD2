@@ -36,7 +36,7 @@ import com.fr3ts0n.pvs.PvList;
 import java.util.Collection;
 
 /**
- * Adapter to display OBD Diagnostic Fault Codes (DTC/DFC) in modern card layout.
+ * Adapter to display OBD Diagnostic Fault Codes (DTC/DFC) in strict card layout.
  */
 public class DfcItemAdapter extends ObdItemAdapter
 {
@@ -69,12 +69,18 @@ public class DfcItemAdapter extends ObdItemAdapter
 		View itemAccent = v.findViewById(R.id.item_accent);
 		ImageView ivIcon = v.findViewById(R.id.obd_icon);
 		TextView tvDescr = v.findViewById(R.id.obd_label);
+		TextView tvValueWide = v.findViewById(R.id.obd_value_wide);
 		TextView tvSublabel = v.findViewById(R.id.obd_sublabel);
+		View valueColumn = v.findViewById(R.id.value_column);
 		TextView tvValue = v.findViewById(R.id.obd_value);
 		TextView tvUnits = v.findViewById(R.id.obd_units);
+		ImageView ivFavStar = v.findViewById(R.id.iv_fav_star);
 		ProgressBar bar = v.findViewById(R.id.bar);
 
 		if (bar != null) bar.setVisibility(View.GONE);
+		if (tvValueWide != null) tvValueWide.setVisibility(View.GONE);
+		if (ivFavStar != null) ivFavStar.setVisibility(View.GONE);
+		if (valueColumn != null) valueColumn.setVisibility(View.VISIBLE);
 
 		int accentColor = ContextCompat.getColor(getContext(), R.color.status_danger);
 		int statusRes = R.string.dtc_status_confirmed;
@@ -92,7 +98,7 @@ public class DfcItemAdapter extends ObdItemAdapter
 					statusRes = R.string.dtc_status_pending;
 				} else if (svc == ObdProt.OBD_SVC_PERMACODES)
 				{
-					ivIcon.setImageResource(android.R.drawable.ic_dialog_alert);
+					ivIcon.setImageResource(R.drawable.ic_notification);
 					statusRes = R.string.dtc_status_permanent;
 				}
 			}
@@ -112,7 +118,7 @@ public class DfcItemAdapter extends ObdItemAdapter
 		}
 
 		tvValue.setVisibility(View.VISIBLE);
-		tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+		tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
 		tvValue.setTextColor(accentColor);
 		tvValue.setText(String.valueOf(currPv.get(EcuCodeItem.FID_CODE)));
 
