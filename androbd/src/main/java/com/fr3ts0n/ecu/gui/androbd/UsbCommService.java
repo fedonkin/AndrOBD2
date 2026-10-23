@@ -79,11 +79,13 @@ public class UsbCommService extends CommService
 			public void onNewData(final byte[] data)
 			{
 				log.finer("RX: " + ProtUtils.hexDumpBuffer(new String(data, StandardCharsets.UTF_8).toCharArray()));
-				for (byte chr : data)
+				for (byte rawByte : data)
 				{
+					int chr = rawByte & 0xFF;
 					switch (chr)
 					{
 						case 32:
+						case 127:
 							break;
 
 						case '>':
@@ -106,8 +108,11 @@ public class UsbCommService extends CommService
 							break;
 
 						default:
-							//noinspection StringConcatenationInLoop
-							message += (char) chr;
+							if (chr >= 32)
+							{
+								//noinspection StringConcatenationInLoop
+								message += (char) chr;
+							}
 					}
 				}
 			}

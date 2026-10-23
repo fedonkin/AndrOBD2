@@ -38,6 +38,7 @@ import java.beans.PropertyChangeEvent;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Stack;
 import java.util.Vector;
 
@@ -509,18 +510,24 @@ public class ObdProt extends ProtoHeader
      */
     public static synchronized void setFixedPid(int[] pidCodes)
     {
-        for (ObdPid currPid : pidSupported)
+        fixedPids.clear();
+        if (pidCodes != null)
         {
-            if (Arrays.binarySearch(pidCodes, currPid.intValue()) >= 0)
+            for (ObdPid currPid : pidSupported)
             {
-                fixedPids.add(currPid);
+                if (Arrays.binarySearch(pidCodes, currPid.intValue()) >= 0)
+                {
+                    fixedPids.add(currPid);
+                }
             }
         }
+        JaguarStypeSupport.setFixedPidSelection(pidCodes);
     }
 
     public static synchronized void resetFixedPid()
     {
         fixedPids.clear();
+        JaguarStypeSupport.clearFixedPidSelection();
     }
 
     /**
@@ -619,6 +626,17 @@ public class ObdProt extends ProtoHeader
                         }
                         log.fine(String.format("Optional Jaguar service 0x%02X NRC 0x%02X (%s)",
                                 svc, nrcCode, lastTxMsg));
+                        return result;
+                    }
+                    // Pre-2010 ECUs (EOBD / ISO 9141 / J1850 / early CAN) do not support Mode 0A
+                    // (Permanent DTCs) and some omit Mode 07: skip quietly without wiping Mode 03 codes
+                    if ((svc == OBD_SVC_PERMACODES || svc == OBD_SVC_PENDINGCODES)
+                            && (nrcCode == NRC.SNS.code
+                                || nrcCode == NRC.SFNS.code
+                                || nrcCode == NRC.ROOR.code))
+                    {
+                        log.fine(String.format("Optional DTC mode 0x%02X not supported (NRC 0x%02X)",
+                                svc, nrcCode));
                         return result;
                     }
                     // get NRC object
@@ -769,24 +787,31 @@ public class ObdProt extends ProtoHeader
                         if (hasNumCodes)
                         {
                             nCodes = Integer.valueOf(new String(buffer, 2, 2), 16);
-                            setNumCodes(nCodes);
+                            int milBit = this.numCodes & 0x80;
+                            int prevCount = this.numCodes & 0x7F;
+                            if (msgService == OBD_SVC_READ_CODES && prevCount == 0)
+                            {
+                                setNumCodes(milBit | nCodes);
+                            } else if (nCodes > prevCount)
+                            {
+                                setNumCodes(milBit | nCodes);
+                            }
                             // DTC data starts at offset 4 (byte 2)
                             DTCOffs = 4;
                         }
 
                         // read in all trouble codes
-                        for (int i = DTCOffs; i < buffer.length; i += 4)
+                        for (int i = DTCOffs; i + 4 <= buffer.length; i += 4)
                         {
                             key = Integer.valueOf(new String(buffer, i, 4), 16);
                             currCode = key.intValue();
                             if (currCode != 0)
                             {
-                                if ((code = knownCodes.get(key)) == null)
-                                {
-                                    code = new ObdCodeItem(key.intValue(),
-                                                           Messages.getString(
-                                                           "customer.specific.trouble.code.see.manual"));
-                                }
+                                EcuCodeItem known = knownCodes.get(key);
+                                String desc = (known != null && known.get(EcuCodeItem.FID_DESCRIPT) != null)
+                                        ? String.valueOf(known.get(EcuCodeItem.FID_DESCRIPT))
+                                        : Messages.getString("customer.specific.trouble.code.see.manual");
+                                code = new ObdCodeItem(currCode, desc);
                                 log.fine(String.format("+DFC: %04x: %s", key, code.toString()));
                                 // Remember received message service to know code status
                                 code.put(EcuCodeItem.FID_STATUS, Integer.valueOf(msgService));
@@ -797,8 +822,8 @@ public class ObdProt extends ProtoHeader
                                     {
                                         code.put(JaguarStypeSupport.CODE_FIELD_MODULE, mod.shortTag);
                                     }
-                                    tCodes.remove(Integer.valueOf(0));
                                 }
+                                tCodes.remove(Integer.valueOf(0));
                                 tCodes.put(key, code);
                                 // if number of codes hasn't been delivered yet ...
                                 if(!hasNumCodes)
@@ -808,7 +833,7 @@ public class ObdProt extends ProtoHeader
                                 }
                             }
                         }
-                        if (nCodes == 0 && (!JaguarStypeSupport.isEnabled() || tCodes.isEmpty()))
+                        if (nCodes == 0 && tCodes.isEmpty())
                         {
                             tCodes.put(0, new ObdCodeItem(0, Messages.getString(
                                     "no.trouble.codes.set")));
@@ -991,13 +1016,20 @@ public class ObdProt extends ProtoHeader
             case OBD_SVC_READ_CODES:
             case OBD_SVC_PENDINGCODES:
             case OBD_SVC_PERMACODES:
-                numCodes = 0;
-                // Queue requests for reading all trouble codes
-                cmdStack.add(String.format("%02X", OBD_SVC_READ_CODES));
-                cmdStack.add(String.format("%02X", OBD_SVC_PENDINGCODES));
-                cmdStack.add(String.format("%02X", OBD_SVC_PERMACODES));
-                // read PID number of codes ...
-                writeTelegram(emptyBuffer, OBD_SVC_DATA, 1);
+                if (clearLists)
+                {
+                    numCodes = 0;
+                    cmdStack.clear();
+                    // Push onto LIFO cmdStack so pop() executes 03 -> 07 -> 0A in forward order
+                    if (!JaguarStypeSupport.isEnabled())
+                    {
+                        cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
+                    }
+                    cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
+                    cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
+                    // read PID number of codes ...
+                    writeTelegram(emptyBuffer, OBD_SVC_DATA, 1);
+                }
                 break;
 
             case OBD_SVC_CLEAR_CODES:

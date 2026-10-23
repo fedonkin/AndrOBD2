@@ -264,6 +264,19 @@ class ObdItemAdapter extends ArrayAdapter<Object>
     @SuppressWarnings("unchecked")
     private static int comparePidOrder(Object lhs, Object rhs)
     {
+        if (lhs instanceof EcuDataPv && rhs instanceof EcuDataPv)
+        {
+            EcuDataPv a = (EcuDataPv) lhs;
+            EcuDataPv b = (EcuDataPv) rhs;
+            int cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_PID), b.getAsInt(EcuDataPv.FID_PID));
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_OFS), b.getAsInt(EcuDataPv.FID_OFS));
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_BIT_OFS), b.getAsInt(EcuDataPv.FID_BIT_OFS));
+            if (cmp != 0) return cmp;
+            return String.valueOf(a.get(EcuDataPv.FID_DESCRIPT))
+                    .compareTo(String.valueOf(b.get(EcuDataPv.FID_DESCRIPT)));
+        }
         int result = String.valueOf(lhs).compareTo(String.valueOf(rhs));
         if (result == 0 && lhs instanceof IndexedProcessVar && rhs instanceof IndexedProcessVar)
         {
@@ -293,7 +306,9 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             if (pv != null)
                 filtered.add(pv);
         }
-        if (JaguarStypeSupport.isEnabled())
+        if (JaguarStypeSupport.isEnabled()
+                && prefs.contains(SettingsActivity.KEY_DATA_ITEMS)
+                && !prefs.getBoolean(SettingsActivity.KEY_JAGUAR_ITEMS_SEEDED, false))
         {
             for (Object val : pvs.values())
             {

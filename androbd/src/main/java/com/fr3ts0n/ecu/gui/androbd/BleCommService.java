@@ -26,6 +26,8 @@ import com.fr3ts0n.prot.TelegramWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -68,14 +70,19 @@ public class BleCommService
     private static final UUID LE_TIO_CHAR_RX = UUID.fromString("00000002-0000-1000-8000-008025000000");
 
     /* Table of UUIDs for each service and corresponding RX/TX characteristics */
-    private static final Map<UUID, UUID[]> serialUUIDs = Map.of(
-            LE_NRF_SERVICE, new UUID[]{LE_NRF_CHAR_RW2, LE_NRF_CHAR_RW3},
-            LE_NEXAS, new UUID[]{LE_NEXAS_RX, LE_NEXAS_TX},
-            LE_VLINK_SVC, new UUID[]{LE_VLINK_RX, LE_VLINK_TX},
-            LE_MICROCHIP_SERVICE, new UUID[]{LE_MICROCHIP_CHAR_RW, LE_MICROCHIP_CHAR_W},
-            LE_CC254X_SERVICE, new UUID[]{LE_CC254X_CHAR_RW, LE_CC254X_CHAR_RW},
-            LE_TIO_SERVICE, new UUID[]{LE_TIO_CHAR_TX, LE_TIO_CHAR_RX}
-    );
+    private static final Map<UUID, UUID[]> serialUUIDs = createSerialUuidMap();
+
+    private static Map<UUID, UUID[]> createSerialUuidMap()
+    {
+        Map<UUID, UUID[]> map = new LinkedHashMap<UUID, UUID[]>();
+        map.put(LE_NRF_SERVICE, new UUID[]{LE_NRF_CHAR_RW2, LE_NRF_CHAR_RW3});
+        map.put(LE_NEXAS, new UUID[]{LE_NEXAS_RX, LE_NEXAS_TX});
+        map.put(LE_VLINK_SVC, new UUID[]{LE_VLINK_RX, LE_VLINK_TX});
+        map.put(LE_MICROCHIP_SERVICE, new UUID[]{LE_MICROCHIP_CHAR_RW, LE_MICROCHIP_CHAR_W});
+        map.put(LE_CC254X_SERVICE, new UUID[]{LE_CC254X_CHAR_RW, LE_CC254X_CHAR_RW});
+        map.put(LE_TIO_SERVICE, new UUID[]{LE_TIO_CHAR_TX, LE_TIO_CHAR_RX});
+        return Collections.unmodifiableMap(map);
+    }
 
     private BluetoothDevice mDevice;
     private BluetoothGatt gatt;
@@ -245,6 +252,7 @@ public class BleCommService
             switch (chr)
             {
                 case 32:
+                case 127:
                     break;
 
                 case '>':
@@ -267,8 +275,11 @@ public class BleCommService
                     break;
 
                 default:
-                    //noinspection StringConcatenationInLoop
-                    message += chr;
+                    if (chr >= 32)
+                    {
+                        //noinspection StringConcatenationInLoop
+                        message += chr;
+                    }
             }
         }
         return result;
@@ -279,6 +290,23 @@ public class BleCommService
     public void connect(Object device, boolean secure)
     {
         stopping = false;
+        synchronized (txQueue)
+        {
+            txQueue.clear();
+            writeInFlight = false;
+            gattReady = false;
+        }
+        message = "";
+        if (gatt != null)
+        {
+            try
+            {
+                gatt.close();
+            } catch (Exception ignored)
+            {
+            }
+            gatt = null;
+        }
         mDevice = (BluetoothDevice) device;
         String devName = mDevice.getName();
         log.info("BLE connect to " + mDevice.getAddress() + " (" + devName + ")");

@@ -141,10 +141,15 @@ public class ChartActivity extends AppCompatActivity
 
         sensorData = new XYMultipleSeriesDataset();
         chartView = findViewById(R.id.modern_chart_view);
+        if (chartView != null)
+        {
+            chartView.setLiveMode(doLiveUpdates);
+        }
 
         setUpChartData(positions);
         bindChartControls();
-        updateWindowSelectionUi(WIN_2M);
+        long initialWin = doLiveUpdates ? WIN_2M : WIN_ALL;
+        selectTimeWindow(initialWin);
 
         if (!pidNumbers.isEmpty())
         {

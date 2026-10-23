@@ -477,9 +477,19 @@ public class ElmProt
 		selectedEcuAddress = ecuAddress;
 		// ensure headers are off
 		pushCommand(CMD.SETHEADER, 0);
-		// set/clear RX filter
-		pushCommand((selectedEcuAddress != 0) ? CMD.SETCANRXFLT : CMD.CLRCANRXFLT,
-			selectedEcuAddress);
+		// set/clear RX filter (ATCRA is valid only for 11-bit/29-bit CAN IDs >= 0x100)
+		if (selectedEcuAddress >= 0x100)
+		{
+			pushCommand(CMD.SETCANRXFLT, selectedEcuAddress);
+		}
+		else if (selectedEcuAddress > 0)
+		{
+			pushTelegram(String.format(Locale.US, "ATSR%02X", Integer.valueOf(selectedEcuAddress)));
+		}
+		else
+		{
+			pushCommand(CMD.CLRCANRXFLT, 0);
+		}
 	}
 	
 	/**
@@ -609,6 +619,8 @@ public class ElmProt
 	 */
 	private volatile boolean customModuleBusActive = false;
 	private volatile boolean moduleScanInProgress = false;
+	private volatile boolean detectedJ1850Pwm = false;
+	private volatile boolean demoCodesCleared = false;
 
 	/**
 	 * reset ELM adapter
@@ -617,6 +629,11 @@ public class ElmProt
 	{
 		customModuleBusActive = false;
 		moduleScanInProgress = false;
+		detectedJ1850Pwm = false;
+		demoCodesCleared = false;
+		charsExpected = 0;
+		responsePending = false;
+		lastRxMsg = "";
 		if (JaguarStypeSupport.isEnabled())
 		{
 			JaguarStypeSupport.resetSessionState();
@@ -641,6 +658,7 @@ public class ElmProt
 		
 		// clear all identified ECU addresses
 		ecuAddresses.clear();
+		detectedJ1850Pwm = false;
 		// clear selected ECU
 		selectedEcuAddress = 0;
 		// remember to disable headers again
@@ -721,6 +739,16 @@ public class ElmProt
 				int i;
 				int crc=0;
 				byte[] binBuff = fromHex(buffer);
+				int b0 = binBuff[0] & 0xFF;
+				int b1 = binBuff[1] & 0xFF;
+				// Headerless Jaguar Mode 22 (62...) and module DTC/session replies (50/53/54/58/59)
+				// must never be sliced as raw ISO headers when last payload byte happens to match sum%256
+				if (JaguarStypeSupport.isEnabled()
+						&& (b0 == 0x62 || b0 == 0x53 || b0 == 0x58 || b0 == 0x59 || b0 == 0x50 || b0 == 0x54)
+						&& b1 != 0x6B && b1 != 0xF1)
+				{
+					return false;
+				}
 				for (i=0; i<binBuff.length-1; i++)
 				{
 					// treat each byte as unsigned - checksum is mod 256
@@ -811,8 +839,10 @@ public class ElmProt
 			
 			// received a PROMPT, what was the last response?
 			case PROMPT:
+				String rxBeforePrompt = lastRxMsg;
+				lastRxMsg = "";
 				// check for last received message
-				switch (getResponseId(lastRxMsg))
+				switch (getResponseId(rxBeforePrompt))
 				{
 					case NOCONN:
 					case NOCONN2:
@@ -823,6 +853,8 @@ public class ElmProt
 					case BUSINIERR3:
 					case BUSBUSY:
 					case FBERROR:
+						responsePending = false;
+						charsExpected = 0;
 						if (JaguarStypeSupport.isEnabled()
 								&& (moduleScanInProgress
 								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
@@ -843,6 +875,8 @@ public class ElmProt
 						break;
 					
 					case DATAERROR:
+						responsePending = false;
+						charsExpected = 0;
 						if (JaguarStypeSupport.isEnabled()
 								&& (moduleScanInProgress
 								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
@@ -857,11 +891,15 @@ public class ElmProt
 					
 					case BUFFERFULL:
 					case RXERROR:
+						responsePending = false;
+						charsExpected = 0;
 						setStatus(STAT.RXERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
 					
 					case ERROR:
+						responsePending = false;
+						charsExpected = 0;
 						if (JaguarStypeSupport.isEnabled()
 								&& (moduleScanInProgress
 								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
@@ -875,6 +913,8 @@ public class ElmProt
 						break;
 
 					case NODATA:
+						responsePending = false;
+						charsExpected = 0;
 						if (JaguarStypeSupport.isEnabled()
 								&& (moduleScanInProgress
 								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
@@ -883,20 +923,37 @@ public class ElmProt
 							proceedAfterOptionalFailure();
 							break;
 						}
-						setStatus(STAT.NODATA);
-						// re-queue next data item
-						if (service != OBD_SVC_NONE)
+						if (service == OBD_SVC_READ_CODES
+								|| service == OBD_SVC_PENDINGCODES
+								|| service == OBD_SVC_PERMACODES)
 						{
-							pushTelegram(
-								String.valueOf(
-									createTelegram(emptyBuffer, service, getNextSupportedPid()))
-							);
+							// NODATA on 03/07/0A simply means no codes in that mode;
+							// continue draining remaining code modes without resetting protocol
+							if (cmdStack.isEmpty() && tCodes.isEmpty())
+							{
+								tCodes.put(0, new ObdCodeItem(0,
+										Messages.getString("no.trouble.codes.set")));
+							}
 						}
-						// increase OBD timeout since we may expect answers too fast
-						mAdaptiveTiming.adapt(true);
-						// set to preferred protocol
-						pushCommand(CMD.SETPROT, preferredProtocol.ordinal());
-						// NO break here since reaction is only quqeued
+						else
+						{
+							setStatus(STAT.NODATA);
+							// re-queue next data item for PID-polling services
+							if (service == OBD_SVC_DATA
+									|| service == OBD_SVC_FREEZEFRAME
+									|| service == OBD_SVC_VEH_INFO)
+							{
+								pushTelegram(
+									String.valueOf(
+										createTelegram(emptyBuffer, service, getNextSupportedPid()))
+								);
+							}
+							// increase OBD timeout since we may expect answers too fast
+							mAdaptiveTiming.adapt(true);
+							// set to preferred protocol
+							pushCommand(CMD.SETPROT, preferredProtocol.ordinal());
+						}
+						// NO break here since reaction is only queued
 					
 					case MODEL:
 					case SEARCH:
@@ -910,7 +967,9 @@ public class ElmProt
 						// if there is a pending data response, handle it now ...
 						if (responsePending)
 						{
-							result = handleDataMessage(lastRxMsg);
+							responsePending = false;
+							charsExpected = 0;
+							result = handleDataMessage(rxBeforePrompt);
 						}
 						
 						// queued commands will be sent first
@@ -966,7 +1025,20 @@ public class ElmProt
 												System.currentTimeMillis(), true);
 										if (mode22Cmd != null)
 										{
-											sendTelegram(mode22Cmd.toCharArray());
+											List<String> pollSeq = JaguarStypeSupport.buildMode22PollSequence(
+													mode22Cmd,
+													ecuAddresses,
+													selectedEcuAddress,
+													detectedJ1850Pwm || preferredProtocol == PROT.ELM_PROT_J1850PWM);
+											if (pollSeq.size() == 1)
+											{
+												sendTelegram(pollSeq.get(0).toCharArray());
+											}
+											else if (!pollSeq.isEmpty())
+											{
+												pushOrderedCommands(pollSeq);
+												sendQueuedTelegram();
+											}
 											break;
 										}
 									}
@@ -993,7 +1065,12 @@ public class ElmProt
 					case ECU_DETECT:
 					{
 						// start of 0100 response is end of address
-						int adrEnd = bufferStr.indexOf("41");
+						// Search "4100" first because SAE J1850 PWM headers begin with "416B..."
+						int adrEnd = bufferStr.indexOf("4100");
+						if (adrEnd < 0)
+						{
+							adrEnd = bufferStr.indexOf("41");
+						}
 						// if not a service response, check for possible NRC
 						if(adrEnd < 0)
 						{
@@ -1018,14 +1095,19 @@ public class ElmProt
 								if (adrLen == 6)
 								{
 									/*
-									 * 6 char (3 byte) prefix -> ISO9141 address <FF><RR><SS>
-									 *     FF - Frame type
+									 * 6 char (3 byte) prefix -> ISO9141 / J1850 address <FF><RR><SS>
+									 *     FF - Frame type (0x41 = SAE J1850 PWM, 0x48 = ISO 9141-2)
 									 *     RR - receiver address
 									 *     SS - sender address
 									 */
+									String hdr = bufferStr.substring(adrStart, adrEnd).toUpperCase(Locale.US);
+									if (hdr.startsWith("416B") || hdr.startsWith("C4"))
+									{
+										detectedJ1850Pwm = true;
+									}
 									adrLen = 2;
 									adrStart = adrEnd - adrLen;
-									// subtract ISO checksum from payload
+									// subtract ISO/J1850 checksum from payload
 									dataEnd -= 2;
 								}
 								else if (adrLen == 10)
@@ -1163,6 +1245,7 @@ public class ElmProt
 				if (!responsePending)
 				{
 					result = handleDataMessage(lastRxMsg);
+					charsExpected = 0;
 				}
 		}
 		return (result);
@@ -1237,15 +1320,31 @@ public class ElmProt
 
 	private List<String> buildStandardBusRestoreCommands()
 	{
-		return Arrays.asList(
-			"ATPC",
-			"ATD",
-			"ATE0",
-			"ATL0",
-			"ATS0",
-			"ATH0",
-			createCommand(CMD.SETPROT, preferredProtocol.ordinal())
-		);
+		List<String> cmds = new ArrayList<String>();
+		cmds.add("ATPC");
+		cmds.add("ATD");
+		cmds.add("ATE0");
+		cmds.add("ATL0");
+		cmds.add("ATS0");
+		cmds.add("ATH0");
+		String setProtCmd = createCommand(CMD.SETPROT, preferredProtocol.ordinal());
+		if (setProtCmd != null)
+		{
+			cmds.add(setProtCmd);
+		}
+		if (selectedEcuAddress >= 0x100)
+		{
+			String craCmd = createCommand(CMD.SETCANRXFLT, selectedEcuAddress);
+			if (craCmd != null)
+			{
+				cmds.add(craCmd);
+			}
+		}
+		else if (selectedEcuAddress > 0)
+		{
+			cmds.add(String.format(Locale.US, "ATSR%02X", Integer.valueOf(selectedEcuAddress)));
+		}
+		return cmds;
 	}
 
 	/**
@@ -1260,6 +1359,7 @@ public class ElmProt
 		JaguarStypeSupport.DiagModule target =
 				(module != null) ? module : JaguarStypeSupport.DiagModule.ENGINE_OBD;
 		JaguarStypeSupport.setActiveModule(target);
+		demoCodesCleared = false;
 		this.service = OBD_SVC_READ_CODES;
 		cmdStack.clear();
 		prepareModuleScanReset();
@@ -1280,9 +1380,8 @@ public class ElmProt
 				customModuleBusActive = false;
 			}
 			seq.add("0101");
-			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
-			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
 			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
 			pushOrderedCommands(seq);
 			sendQueuedTelegram();
 		}
@@ -1317,6 +1416,7 @@ public class ElmProt
 
 		if (runDemo)
 		{
+			demoCodesCleared = true;
 			tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
 			return;
 		}
@@ -1404,6 +1504,9 @@ public class ElmProt
 		// TFT ~ 82.5 C (180.5 F -> raw = 1444 = 0x05A4)
 		int tftRaw = 1400 + (tick % 80);
 		super.handleTelegram(String.format(Locale.US, "621674%04X", Integer.valueOf(tftRaw)).toCharArray());
+		// TOT (ZF 6HP26 1-byte CAN formula: raw - 50 C -> 83..92 C)
+		int totByte = 133 + (tick % 10);
+		super.handleTelegram(String.format(Locale.US, "6211BD%02X", Integer.valueOf(totByte)).toCharArray());
 		// EOT ~ 96.0 C (raw = 13600 = 0x3520)
 		int eotRaw = 13300 + (tick % 120) * 4;
 		super.handleTelegram(String.format(Locale.US, "621310%04X", Integer.valueOf(eotRaw)).toCharArray());
@@ -1411,7 +1514,7 @@ public class ElmProt
 		int slipRaw = (8 + (tick % 36)) * 4;
 		super.handleTelegram(String.format(Locale.US, "6211B8%04X", Integer.valueOf(slipRaw)).toCharArray());
 		// Current Gear 1..5 (raw = gear * 2)
-		int gearRaw = (1 + ((tick / 30) % 5)) * 2;
+		int gearRaw = (1 + ((tick / 10) % 5)) * 2;
 		super.handleTelegram(String.format(Locale.US, "6211B3%02X", Integer.valueOf(gearRaw)).toCharArray());
 		// Cooling Fan Speed & Duty
 		int fanByte = 60 + (tick % 40);
@@ -1426,10 +1529,11 @@ public class ElmProt
 		super.handleTelegram(String.format(Locale.US, "6216CD%04X", Integer.valueOf(vvtAngle)).toCharArray());
 		super.handleTelegram("6216CE0004".toCharArray());
 		// IMT Intake Valve (toggles at higher simulated RPM) & VREF ~ 5.01 V (0xFFC0)
-		super.handleTelegram(((tick % 100) > 65 ? "62110310" : "62110300").toCharArray());
+		super.handleTelegram(((tick % 40) > 25 ? "62110310" : "62110300").toCharArray());
 		super.handleTelegram("621155FFC0".toCharArray());
-		// Supercharger IAT2 ~ 48 C (0x58)
+		// Supercharger IAT2 ~ 48 C (0x58) & Module DTC count
 		super.handleTelegram(String.format(Locale.US, "62123B%02X", Integer.valueOf(84 + (tick % 10))).toCharArray());
+		super.handleTelegram((demoCodesCleared ? "62020000" : "62020003").toCharArray());
 	}
 	
 	// switch to exit the demo thread
@@ -1441,8 +1545,10 @@ public class ElmProt
 	public void run()
 	{
 		int value = 0;
+		int demoTick = 0;
 		Integer pid;
 		runDemo = true;
+		demoCodesCleared = false;
 		
 		log.info("ELM DEMO thread started");
 		while (runDemo)
@@ -1486,7 +1592,7 @@ public class ElmProt
 						case OBD_SVC_PERMACODES:
 							if (JaguarStypeSupport.isEnabled())
 							{
-								if (tCodes.isEmpty())
+								if (!demoCodesCleared && tCodes.isEmpty())
 								{
 									simulateJaguarDemoDtcs(JaguarStypeSupport.getActiveModule());
 								}
@@ -1531,10 +1637,11 @@ public class ElmProt
 									service, pid, value, value, value, value).toCharArray());
 								if (service == OBD_SVC_DATA
 										&& JaguarStypeSupport.isEnabled()
-										&& (value % 12 == 0))
+										&& (demoTick % 8 == 0))
 								{
-									simulateJaguarDemoMode22(value);
+									simulateJaguarDemoMode22(demoTick / 8);
 								}
+								demoTick++;
 							}
 							else
 							{
@@ -1562,11 +1669,22 @@ public class ElmProt
 								handleTelegram("490054000000".toCharArray());
 							}
 							
-							// send VIN "0123456789ABCDEFG"
-							handleTelegram("014".toCharArray());
-							handleTelegram("1:49020130313233".toCharArray());
-							handleTelegram("2:343536373839".toCharArray());
-							handleTelegram("3:41424344454647".toCharArray());
+							if (JaguarStypeSupport.isEnabled())
+							{
+								// send Jaguar S-Type VIN "SAJAC01P62FM45255"
+								handleTelegram("014".toCharArray());
+								handleTelegram("1:49020153414A41".toCharArray());
+								handleTelegram("2:433031503632".toCharArray());
+								handleTelegram("3:464D3435323535".toCharArray());
+							}
+							else
+							{
+								// send VIN "0123456789ABCDEFG"
+								handleTelegram("014".toCharArray());
+								handleTelegram("1:49020130313233".toCharArray());
+								handleTelegram("2:343536373839".toCharArray());
+								handleTelegram("3:41424344454647".toCharArray());
+							}
 							
 							// send 2 CAL-IDs "GSPA..." without length id
 							handleTelegram("0:490402475350".toCharArray());
@@ -1663,9 +1781,8 @@ public class ElmProt
 					else if (service == OBD_SVC_READ_CODES)
 					{
 						seq.add("0101");
-						seq.add("0A");
-						seq.add("07");
 						seq.add("03");
+						seq.add("07");
 					}
 					else if (service == OBD_SVC_CLEAR_CODES)
 					{
@@ -1679,7 +1796,8 @@ public class ElmProt
 
 			// If Jaguar mode is active and a non-engine module is currently selected on Fault Codes,
 			// delegate OBD_SVC_READ_CODES / OBD_SVC_CLEAR_CODES to the Jaguar module scanner.
-			if (JaguarStypeSupport.isEnabled()
+			if (clearLists
+					&& JaguarStypeSupport.isEnabled()
 					&& JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD)
 			{
 				if (service == OBD_SVC_READ_CODES)

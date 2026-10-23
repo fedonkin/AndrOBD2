@@ -63,6 +63,7 @@ public class ModernChartView extends View
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
 
     private long timeWindowMs = 120_000L; // Default: 2 minutes
+    private boolean liveMode = true;
     private boolean paused = false;
     private long pausedRightEdgeMs = 0L;
     private float scrubFraction = -1f; // -1 = inactive, 0..1 = active crosshair position
@@ -162,6 +163,17 @@ public class ModernChartView extends View
     public List<SeriesEntry> getSeriesEntries()
     {
         return entries;
+    }
+
+    public void setLiveMode(boolean live)
+    {
+        this.liveMode = live;
+        invalidate();
+    }
+
+    public boolean isLiveMode()
+    {
+        return liveMode;
     }
 
     public void setTimeWindowMs(long windowMs)
@@ -274,11 +286,19 @@ public class ModernChartView extends View
             }
         }
 
-        long now = paused && pausedRightEdgeMs > 0L ? pausedRightEdgeMs : System.currentTimeMillis();
-        long maxT = (globalLatest > Long.MIN_VALUE) ? Math.max(globalLatest, now) : now;
-        if (paused && pausedRightEdgeMs > 0L)
+        long maxT;
+        if (!liveMode)
+        {
+            maxT = (globalLatest > Long.MIN_VALUE) ? globalLatest : System.currentTimeMillis();
+        }
+        else if (paused && pausedRightEdgeMs > 0L)
         {
             maxT = pausedRightEdgeMs;
+        }
+        else
+        {
+            long now = System.currentTimeMillis();
+            maxT = (globalLatest > Long.MIN_VALUE) ? Math.max(globalLatest, now) : now;
         }
 
         long minT;

@@ -70,6 +70,7 @@ public class SettingsActivity extends AppCompatActivity
 		"ext_file_dataitems"
 	};
 	static final String KEY_DATA_ITEMS = "data_items";
+	static final String KEY_JAGUAR_ITEMS_SEEDED = "jaguar_mode22_items_seeded";
 	static final String KEY_PROT_SELECT = "protocol";
 	static final String KEY_COMM_MEDIUM = "comm_medium";
 	static final String KEY_VEHICLE_PROFILE = JaguarStypeSupport.PREF_KEY_VEHICLE_PROFILE;
@@ -476,6 +477,23 @@ public class SettingsActivity extends AppCompatActivity
 			if (itemList.getValues().size() == 0)
 			{
 				itemList.setValues(selections);
+				if (JaguarStypeSupport.isEnabled())
+				{
+					prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
+				}
+			}
+			else if (JaguarStypeSupport.isEnabled()
+					&& !prefs.getBoolean(KEY_JAGUAR_ITEMS_SEEDED, false))
+			{
+				// Seed Jaguar Mode 22 items once into an existing selection set so they start checked
+				// while still allowing the user to uncheck individual items afterward.
+				HashSet<String> merged = new HashSet<String>(itemList.getValues());
+				for (EcuDataItem jagItem : JaguarStypeSupport.getAllMode22DataItems())
+				{
+					merged.add(jagItem.toString());
+				}
+				itemList.setValues(merged);
+				prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
 			}
 		}
 
@@ -587,9 +605,21 @@ public class SettingsActivity extends AppCompatActivity
 				}
 				else
 				{
-					// OPEN intents require result handling
-					intent.addCategory(Intent.CATEGORY_OPENABLE);
-					startActivityForResult(intent, preference.hashCode());
+					// OPEN intents require a 16-bit requestCode (0..65535) in AndroidX Fragment
+					int reqCode = -1;
+					for (int idx = 0; idx < extKeys.length; idx++)
+					{
+						if (extKeys[idx].equals(preference.getKey()))
+						{
+							reqCode = 100 + idx;
+							break;
+						}
+					}
+					if (reqCode >= 0 && intent != null)
+					{
+						intent.addCategory(Intent.CATEGORY_OPENABLE);
+						startActivityForResult(intent, reqCode);
+					}
 				}
 			}
 			catch(Exception e)
@@ -606,21 +636,25 @@ public class SettingsActivity extends AppCompatActivity
 		@Override
 		public void onActivityResult(int requestCode, int resultCode, Intent data)
 		{
-			Preference pref;
-			SharedPreferences.Editor ed = prefs.edit();
-			String value = (resultCode == Activity.RESULT_OK) ? String.valueOf(data.getData()) : null;
-			// find the right key
-			for (String key : extKeys)
+			super.onActivityResult(requestCode, resultCode, data);
+			int extIdx = requestCode - 100;
+			if (extIdx < 0 || extIdx >= extKeys.length)
 			{
-				pref = findPreference(key);
-				if (pref.hashCode() == requestCode)
-				{
-					ed.putString(key, value);
-					pref.setSummary(value != null ? value : getString(R.string.select_extension));
-				}
+				return;
 			}
-
-			ed.apply();
+			if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null)
+			{
+				// User canceled picker -> preserve previously configured extension file
+				return;
+			}
+			String key = extKeys[extIdx];
+			String value = String.valueOf(data.getData());
+			prefs.edit().putString(key, value).apply();
+			Preference pref = findPreference(key);
+			if (pref != null)
+			{
+				pref.setSummary(value);
+			}
 		}
 
 		@Override
@@ -652,11 +686,15 @@ public class SettingsActivity extends AppCompatActivity
 			}
 
 			if(ELM_TIMING_SELECT.equals(key))
-				//noinspection ConstantConditions
-				findPreference(ELM_MIN_TIMEOUT)
-					.setEnabled(ElmProt.AdaptTimingMode.SOFTWARE.toString()
-						          .equals(((ListPreference)pref).getValue())
-					           );
+			{
+				Preference minTimeoutPref = findPreference(ELM_MIN_TIMEOUT);
+				if (minTimeoutPref != null && pref instanceof ListPreference)
+				{
+					minTimeoutPref.setEnabled(
+						ElmProt.AdaptTimingMode.SOFTWARE.toString()
+							.equals(((ListPreference) pref).getValue()));
+				}
+			}
 
 			if(KEY_APP_LANGUAGE.equals(key))
 			{

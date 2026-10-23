@@ -11,8 +11,11 @@ import com.fr3ts0n.pvs.PvList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -206,5 +209,81 @@ class JaguarStypeSupportTest
         assertTrue(x202Ccm.contains("ATCRA7CC"));
         assertTrue(x202Ccm.contains("ATSH7C4"));
         assertTrue(x202Ccm.contains("13"));
+    }
+
+    @Test
+    void j1850PwmHeaderAndMode22Addressing_handlesScpAndCanCorrectly()
+    {
+        JaguarStypeSupport.setProfileByKey("jaguar_stype_auto", ObdProt.PidPvs);
+        ElmProt elm = new ElmProt();
+        elm.setStatus(ElmProt.STAT.ECU_DETECT);
+        // SAE J1850 PWM response to 0100 starts with "416B104100..." (0x41 header byte!)
+        elm.handleTelegram("416B104100BF9FA8914A".toCharArray());
+        elm.setStatus(ElmProt.STAT.ECU_DETECTED);
+
+        assertTrue(elm.ecuAddresses.contains(Integer.valueOf(0x10)));
+        assertTrue(elm.hasSupportedPids());
+
+        // SCP physical PCM header wrapping for Mode 22
+        Set<Integer> scpAddrs = new HashSet<Integer>(Arrays.asList(Integer.valueOf(0x10)));
+        List<String> scpPoll = JaguarStypeSupport.buildMode22PollSequence("221674", scpAddrs, 0, true);
+        assertEquals(Arrays.asList("ATSHC410F1", "221674", "ATSH616AF1"), scpPoll);
+
+        // CAN TCM RX filter wrapping when ECM 0x7E8 is selected
+        Set<Integer> canAddrs = new HashSet<Integer>(
+                Arrays.asList(Integer.valueOf(0x7E8), Integer.valueOf(0x7E9)));
+        List<String> canTcmPoll = JaguarStypeSupport.buildMode22PollSequence(
+                "2211BD", canAddrs, 0x7E8, false);
+        assertEquals(Arrays.asList("ATCRA7E9", "2211BD", "ATCRA7E8"), canTcmPoll);
+    }
+
+    @Test
+    void elmProt_protectsMode22FromIsoChecksumCollisionAndPreservesMilAndCodes()
+    {
+        JaguarStypeSupport.setProfileByKey("jaguar_stype_auto", ObdProt.PidPvs);
+        EcuDataItem.cnvSystem = EcuDataItem.SYSTEM_METRIC;
+        ObdProt.PidPvs.clear();
+        ObdProt.tCodes.clear();
+
+        ElmProt elm = new ElmProt();
+        elm.setService(ObdProt.OBD_SVC_DATA, false);
+
+        // (0x62 + 0x16 + 0x74 + 0x05) & 0xFF == 0xF1: must NOT be stripped as raw ISO telegram!
+        elm.handleTelegram("62167405F1".toCharArray());
+        EcuDataPv tftPv = (EcuDataPv) ObdProt.PidPvs.get("1674.0.0");
+        assertNotNull(tftPv);
+        // 0x05F1 = 1521 -> 1521/8 = 190.125 F -> 87.847 C
+        assertEquals(87.85f, ((Number) tftPv.get(EcuDataPv.FID_VALUE)).floatValue(), 0.1f);
+
+        // Pre-2010 DTC read sequence: 0101 (MIL ON + 2 codes) -> 43 (2 codes) -> 4700 -> 7F0A11
+        elm.setService(ObdProt.OBD_SVC_READ_CODES, false);
+        elm.handleTelegram("410182000000".toCharArray());
+        elm.handleTelegram("430216460171".toCharArray());
+        elm.handleTelegram("4700".toCharArray());
+        elm.handleTelegram("7F0A11".toCharArray());
+
+        assertEquals(0x82, elm.getNumCodes());
+        assertEquals(2, ObdProt.tCodes.size());
+        assertFalse(ObdProt.tCodes.containsKey(Integer.valueOf(0)));
+        assertTrue(ObdProt.tCodes.containsKey(Integer.valueOf(0x1646)));
+        assertTrue(ObdProt.tCodes.containsKey(Integer.valueOf(0x0171)));
+    }
+
+    @Test
+    void moduleDtcParser_deduplicatesCountAndDoesNotMutateSharedKnownCodes()
+    {
+        JaguarStypeSupport.setProfileByKey("jaguar_stype_auto", null);
+        ObdCodeList known = new ObdCodeList();
+        PvList tCodes = new PvList();
+
+        JaguarStypeSupport.setActiveModule(JaguarStypeSupport.DiagModule.EPB);
+        int first = JaguarStypeSupport.parseModuleDtcResponse(
+                ObdProt.OBD_SVC_MOD_CODES_18, "5801509360".toCharArray(), known, tCodes);
+        int duplicate = JaguarStypeSupport.parseModuleDtcResponse(
+                ObdProt.OBD_SVC_MOD_CODES_19, "5902AF5093002F".toCharArray(), known, tCodes);
+
+        assertEquals(1, first);
+        assertEquals(0, duplicate);
+        assertNull(known.get(Integer.valueOf(0x5093)).get(JaguarStypeSupport.CODE_FIELD_MODULE));
     }
 }

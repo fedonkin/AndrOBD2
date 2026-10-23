@@ -223,7 +223,6 @@ public class MainActivity extends PluginManager
     public static PvList mPluginPvs = new PvList();
 
     static SharedPreferences prefs;
-    private static AlertDialog.Builder dlgBuilder;
     private static BluetoothAdapter mBluetoothAdapter = null;
     private static String mConnectedDeviceName = null;
     private static Menu menu;
@@ -461,22 +460,26 @@ public class MainActivity extends PluginManager
                             switch (nrc.disp)
                             {
                                 case ERROR:
-                                    dlgBuilder
-                                            .setIcon(android.R.drawable.ic_dialog_alert)
-                                            .setTitle(R.string.obd_error)
-                                            .setMessage(nrcMsg)
-                                            .setPositiveButton(android.R.string.ok, null)
-                                            .setNegativeButton(null, null)
-                                            .show();
+                                    if (!isFinishing() && !isDestroyed())
+                                    {
+                                        new AlertDialog.Builder(MainActivity.this)
+                                                .setIcon(android.R.drawable.ic_dialog_alert)
+                                                .setTitle(R.string.obd_error)
+                                                .setMessage(nrcMsg)
+                                                .setPositiveButton(android.R.string.ok, null)
+                                                .show();
+                                    }
                                     break;
                                 case WARN:
-                                    dlgBuilder
-                                            .setIcon(android.R.drawable.ic_dialog_info)
-                                            .setTitle(R.string.obd_error)
-                                            .setMessage(nrcMsg)
-                                            .setPositiveButton(android.R.string.ok, null)
-                                            .setNegativeButton(null, null)
-                                            .show();
+                                    if (!isFinishing() && !isDestroyed())
+                                    {
+                                        new AlertDialog.Builder(MainActivity.this)
+                                                .setIcon(android.R.drawable.ic_dialog_info)
+                                                .setTitle(R.string.obd_error)
+                                                .setMessage(nrcMsg)
+                                                .setPositiveButton(android.R.string.ok, null)
+                                                .show();
+                                    }
                                     break;
                                 case NOTIFY:
                                     Toast.makeText(getApplicationContext(),
@@ -590,8 +593,6 @@ public class MainActivity extends PluginManager
         }
 
         applyThemeMode(false);
-
-        dlgBuilder = new AlertDialog.Builder(this);
 
         mPidAdapter = new ObdItemAdapter(this, R.layout.obd_item, ObdProt.PidPvs);
         mPidAdapter.setIncludePluginPvs(true);
@@ -1442,13 +1443,54 @@ public class MainActivity extends PluginManager
         }
     }
 
+    private static final int[] JAGUAR_PRIORITY_NUMERIC_PIDS = new int[]{
+            JaguarStypeSupport.PID_TRANS_FLUID_TEMP,
+            JaguarStypeSupport.PID_TRANS_OIL_TEMP_TOT,
+            JaguarStypeSupport.PID_TC_SLIP_RPM,
+            JaguarStypeSupport.PID_ENGINE_OIL_TEMP,
+            JaguarStypeSupport.PID_VVT_ANGLE,
+            JaguarStypeSupport.PID_VVT_DUTY_B1,
+            JaguarStypeSupport.PID_VVT_DUTY_B2,
+            0x0C, 0x05, 0x0D
+    };
+
+    private static boolean isContinuousNumericPv(EcuDataPv pv)
+    {
+        if (pv == null || !(pv.get(EcuDataPv.FID_VALUE) instanceof Number))
+        {
+            return false;
+        }
+        Object cnvObj = pv.get(EcuDataPv.FID_CNVID);
+        if (cnvObj instanceof com.fr3ts0n.ecu.Conversion[])
+        {
+            com.fr3ts0n.ecu.Conversion[] cnvs = (com.fr3ts0n.ecu.Conversion[]) cnvObj;
+            if (EcuDataItem.cnvSystem < cnvs.length && cnvs[EcuDataItem.cnvSystem] != null)
+            {
+                com.fr3ts0n.ecu.Conversion cnv = cnvs[EcuDataItem.cnvSystem];
+                if (cnv instanceof com.fr3ts0n.ecu.BitmapConversion
+                        || cnv instanceof com.fr3ts0n.ecu.HashConversion)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private int[] findBestNumericPositions(int maxCount)
     {
         if (currDataAdapter == null) return new int[0];
         ArrayList<Integer> chosen = new ArrayList<>(maxCount);
 
+        int[] priorityPids = (JaguarStypeSupport.isEnabled()
+                && mPidAdapter != null
+                && mPidAdapter.getPreset() != null
+                && mPidAdapter.getPreset().isJaguarPreset())
+                ? JAGUAR_PRIORITY_NUMERIC_PIDS
+                : PRIORITY_NUMERIC_PIDS;
+
         // First pick priority driving telemetry PIDs if present
-        for (int wantedPid : PRIORITY_NUMERIC_PIDS)
+        for (int wantedPid : priorityPids)
         {
             if (chosen.size() >= maxCount) break;
             for (int i = 0; i < currDataAdapter.getCount(); i++)
@@ -1458,7 +1500,7 @@ public class MainActivity extends PluginManager
                 if (obj instanceof EcuDataPv)
                 {
                     EcuDataPv pv = (EcuDataPv) obj;
-                    if (pv.get(EcuDataPv.FID_VALUE) instanceof Number
+                    if (isContinuousNumericPv(pv)
                             && pv.getAsInt(EcuDataPv.FID_PID) == wantedPid)
                     {
                         chosen.add(i);
@@ -1468,13 +1510,12 @@ public class MainActivity extends PluginManager
             }
         }
 
-        // Fill remaining slots with any other numeric PIDs
+        // Fill remaining slots with any other continuous numeric PIDs
         for (int i = 0; i < currDataAdapter.getCount() && chosen.size() < maxCount; i++)
         {
             if (chosen.contains(i)) continue;
             Object obj = currDataAdapter.getItem(i);
-            if (obj instanceof EcuDataPv
-                    && ((EcuDataPv) obj).get(EcuDataPv.FID_VALUE) instanceof Number)
+            if (obj instanceof EcuDataPv && isContinuousNumericPv((EcuDataPv) obj))
             {
                 chosen.add(i);
             }
@@ -2817,6 +2858,9 @@ public class MainActivity extends PluginManager
                 if (resultCode == RESULT_OK && data != null && data.getData() != null)
                 {
                     loadDataFromUri(data.getData());
+                } else if (getMode() == MODE.FILE && ObdProt.PidPvs.isEmpty() && ObdProt.tCodes.isEmpty())
+                {
+                    setMode(MODE.OFFLINE);
                 }
                 break;
 
@@ -2899,9 +2943,21 @@ public class MainActivity extends PluginManager
         if (key == null || ELM_CUSTOM_INIT_CMDS.equals(key))
         {
             String value = prefs.getString(ELM_CUSTOM_INIT_CMDS, null);
-            if (value != null && !value.isEmpty())
+            if (value != null && !value.trim().isEmpty())
             {
-                CommService.elm.setCustomInitCommands(value.split("\n"));
+                ArrayList<String> cleaned = new ArrayList<String>();
+                for (String rawLine : value.split("\n"))
+                {
+                    String trimmed = rawLine.trim();
+                    if (!trimmed.isEmpty())
+                    {
+                        cleaned.add(trimmed);
+                    }
+                }
+                CommService.elm.setCustomInitCommands(cleaned.toArray(new String[0]));
+            } else
+            {
+                CommService.elm.setCustomInitCommands(new String[0]);
             }
         }
 
@@ -3189,20 +3245,23 @@ public class MainActivity extends PluginManager
                             ? String.format(Locale.US, "0x%X", addrArray[i])
                             : String.format(Locale.US, "0x%X — %s", addrArray[i], desc);
                 }
-                dlgBuilder
-                        .setTitle(R.string.select_ecu_addr)
-                        .setItems(entries, new DialogInterface.OnClickListener()
-                        {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which)
+                if (!isFinishing() && !isDestroyed())
+                {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle(R.string.select_ecu_addr)
+                            .setItems(entries, new DialogInterface.OnClickListener()
                             {
-                                int address = addrArray[which];
-                                CommService.elm.setEcuAddress(address);
-                                prefs.edit().putInt(PRESELECT.LAST_ECU_ADDRESS.toString(), address)
-                                        .apply();
-                            }
-                        })
-                        .show();
+                                @Override
+                                public void onClick(DialogInterface dialog, int which)
+                                {
+                                    int address = addrArray[which];
+                                    CommService.elm.setEcuAddress(address);
+                                    prefs.edit().putInt(PRESELECT.LAST_ECU_ADDRESS.toString(), address)
+                                            .apply();
+                                }
+                            })
+                            .show();
+                }
             }
         }
     }
@@ -3549,10 +3608,11 @@ public class MainActivity extends PluginManager
                 mHandler.post(() -> {
                     if (!isFinishing() && !isDestroyed())
                     {
-                        dlgBuilder
+                        new AlertDialog.Builder(MainActivity.this)
                                 .setIcon(android.R.drawable.ic_dialog_alert)
                                 .setTitle(R.string.extension_loading)
                                 .setMessage(getString(R.string.check_cust_settings) + errors)
+                                .setPositiveButton(android.R.string.ok, null)
                                 .show();
                     }
                 });
@@ -3611,7 +3671,14 @@ public class MainActivity extends PluginManager
             return;
         }
 
-        Arrays.sort(obdFiles, Comparator.comparing(File::getName));
+        Arrays.sort(obdFiles, new Comparator<File>()
+        {
+            @Override
+            public int compare(File a, File b)
+            {
+                return a.getName().compareTo(b.getName());
+            }
+        });
         final String[] fileNames = new String[obdFiles.length];
         for (int i = 0; i < obdFiles.length; i++)
         {
@@ -3628,6 +3695,7 @@ public class MainActivity extends PluginManager
                     loadDataFromUri(uri);
                 })
                 .setNegativeButton(android.R.string.cancel, (d, w) -> setMode(MODE.OFFLINE))
+                .setOnCancelListener(d -> setMode(MODE.OFFLINE))
                 .show();
     }
 
@@ -3946,7 +4014,8 @@ public class MainActivity extends PluginManager
 
     private void confirmObdTestControl(String testControlName, int service, int tid)
     {
-        dlgBuilder
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this)
                 .setIcon(android.R.drawable.ic_dialog_alert)
                 .setTitle(testControlName)
                 .setMessage(R.string.obd_test_confirm)
@@ -3961,12 +4030,12 @@ public class MainActivity extends PluginManager
         char[] emptyBuffer = {};
         CommService.elm.writeTelegram(emptyBuffer, service, tid);
 
-        dlgBuilder
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this)
                 .setIcon(android.R.drawable.ic_dialog_info)
                 .setTitle(testControlName)
                 .setMessage(R.string.obd_test_progress)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> { })
-                .setNegativeButton(null, null)
                 .show();
     }
 
@@ -4016,7 +4085,7 @@ public class MainActivity extends PluginManager
                         Intent intent = new Intent(this, ChartActivity.class);
                         intent.putExtra(ChartActivity.POSITIONS, getSelectedPositions());
                         intent.putExtra(ChartActivity.LIVE_UPDATE,
-                                Set.of(MODE.ONLINE, MODE.DEMO).contains(getMode()));
+                                getMode() == MODE.ONLINE || getMode() == MODE.DEMO);
                         startActivityForResult(intent, REQUEST_GRAPH_DISPLAY_DONE);
                         this.dataViewMode = dataViewMode;
                     }

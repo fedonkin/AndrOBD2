@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -293,6 +294,9 @@ public final class JaguarStypeSupport
     private static volatile boolean service22Rejected = false;
     private static int pollCursor = 0;
     private static int mode01InterleaveCounter = 0;
+    private static boolean fixedSelectionActive = false;
+    private static int fixedStandardCount = 0;
+    private static final Set<Integer> fixedMode22Pids = new LinkedHashSet<Integer>();
 
     private static final Map<Integer, Mode22Def> mode22Map = new LinkedHashMap<Integer, Mode22Def>();
     private static final List<Mode22Def> mode22List = new ArrayList<Mode22Def>();
@@ -399,6 +403,120 @@ public final class JaguarStypeSupport
                 }
             }
         }
+    }
+
+    /**
+     * Synchronize fixed-PID selection (Chart / Dashboard / Presets) with Jaguar Mode 22 polling.
+     */
+    public static synchronized void setFixedPidSelection(int[] pidCodes)
+    {
+        fixedMode22Pids.clear();
+        fixedStandardCount = 0;
+        if (pidCodes == null || pidCodes.length == 0)
+        {
+            fixedSelectionActive = false;
+            return;
+        }
+        fixedSelectionActive = true;
+        for (int code : pidCodes)
+        {
+            if (isMode22Pid(code))
+            {
+                fixedMode22Pids.add(Integer.valueOf(code));
+            } else if (code > 0 && code <= 0xFF)
+            {
+                fixedStandardCount++;
+            }
+        }
+    }
+
+    public static synchronized void clearFixedPidSelection()
+    {
+        fixedSelectionActive = false;
+        fixedStandardCount = 0;
+        fixedMode22Pids.clear();
+    }
+
+    public static boolean isTransMode22Pid(int pid16)
+    {
+        return pid16 == PID_TRANS_FLUID_TEMP
+                || pid16 == PID_TRANS_OIL_TEMP_TOT
+                || pid16 == PID_TC_SLIP_RPM
+                || pid16 == PID_CURRENT_GEAR;
+    }
+
+    /**
+     * Build the minimal ELM327 command sequence to poll a Mode 22 PID on the active Jaguar bus
+     * (CAN 500k 7DF / 7E8 / 7E9 vs SCP J1850 PWM physical PCM C410F1) and restore Mode 01 state.
+     */
+    public static List<String> buildMode22PollSequence(String mode22Cmd,
+                                                       Set<Integer> detectedEcuAddresses,
+                                                       int selectedEcuAddress,
+                                                       boolean detectedJ1850Pwm)
+    {
+        if (mode22Cmd == null || mode22Cmd.length() != 6 || !mode22Cmd.startsWith("22"))
+        {
+            return Collections.emptyList();
+        }
+        int pid16;
+        try
+        {
+            pid16 = Integer.parseInt(mode22Cmd.substring(2, 6), 16);
+        } catch (NumberFormatException ex)
+        {
+            return Collections.singletonList(mode22Cmd);
+        }
+
+        boolean hasCanEcu = false;
+        boolean hasCanEcm = false;
+        boolean hasCanTcm = false;
+        if (detectedEcuAddresses != null)
+        {
+            for (Integer addrObj : detectedEcuAddresses)
+            {
+                if (addrObj == null) continue;
+                int addr = addrObj.intValue();
+                if (addr >= 0x700 && addr <= 0x7FF)
+                {
+                    hasCanEcu = true;
+                    if (addr == 0x7E8) hasCanEcm = true;
+                    if (addr == 0x7E9) hasCanTcm = true;
+                }
+            }
+        }
+
+        if (hasCanEcu || activeProfile == Profile.STYPE_X202)
+        {
+            if (selectedEcuAddress >= 0x700 && selectedEcuAddress <= 0x7FF)
+            {
+                if (isTransMode22Pid(pid16) && hasCanTcm && selectedEcuAddress != 0x7E9)
+                {
+                    return Arrays.asList(
+                            "ATCRA7E9",
+                            mode22Cmd,
+                            String.format(Locale.US, "ATCRA%03X", Integer.valueOf(selectedEcuAddress))
+                    );
+                }
+                if (!isTransMode22Pid(pid16) && hasCanEcm && selectedEcuAddress != 0x7E8)
+                {
+                    return Arrays.asList(
+                            "ATCRA7E8",
+                            mode22Cmd,
+                            String.format(Locale.US, "ATCRA%03X", Integer.valueOf(selectedEcuAddress))
+                    );
+                }
+            }
+            return Collections.singletonList(mode22Cmd);
+        }
+
+        if (detectedJ1850Pwm || activeProfile == Profile.STYPE_X200)
+        {
+            // Ford/Jaguar SAE J1850 PWM (SCP) requires physical PCM header C410F1 for Mode 22,
+            // then restores legislative functional header 616AF1 for standard Mode 01 polling.
+            return Arrays.asList("ATSHC410F1", mode22Cmd, "ATSH616AF1");
+        }
+
+        return Collections.singletonList(mode22Cmd);
     }
 
     /**
@@ -746,8 +864,16 @@ public final class JaguarStypeSupport
             return null;
         }
 
-        int stride = jaguarPresetFocused ? 1 : 3;
-        if (hasStandardPids)
+        if (fixedSelectionActive && fixedMode22Pids.isEmpty() && fixedStandardCount > 0)
+        {
+            // User explicitly locked Chart/Dashboard to standard Mode 01 PIDs only
+            return null;
+        }
+
+        boolean effectiveHasStandard = hasStandardPids
+                && (!fixedSelectionActive || fixedStandardCount > 0);
+        int stride = (jaguarPresetFocused || fixedSelectionActive) ? 1 : 3;
+        if (effectiveHasStandard)
         {
             mode01InterleaveCounter++;
             if (mode01InterleaveCounter <= stride)
@@ -762,6 +888,10 @@ public final class JaguarStypeSupport
         {
             int idx = (pollCursor + i) % total;
             Mode22Def def = mode22List.get(idx);
+            if (fixedSelectionActive && !fixedMode22Pids.contains(Integer.valueOf(def.pid16)))
+            {
+                continue;
+            }
             if (!def.supported && def.failCount >= MAX_MODE22_FAILURES)
             {
                 continue;
@@ -771,7 +901,8 @@ public final class JaguarStypeSupport
                 continue;
             }
             pollCursor = (idx + 1) % total;
-            def.nextPollMs = nowMs + def.periodMs;
+            long effectivePeriod = fixedSelectionActive ? Math.min(def.periodMs, 250L) : def.periodMs;
+            def.nextPollMs = nowMs + effectivePeriod;
             return String.format(Locale.US, "22%04X", Integer.valueOf(def.pid16));
         }
         return null;
@@ -782,12 +913,6 @@ public final class JaguarStypeSupport
      */
     public static synchronized void onOptionalCommandFailed(int nrcService, int nrcCode, String lastTxMsg)
     {
-        if (nrcService == 0x22 && nrcCode == 0x11)
-        {
-            // Service 0x22 explicitly not supported on this bus
-            service22Rejected = true;
-            return;
-        }
         if (lastTxMsg != null)
         {
             String upper = lastTxMsg.trim().toUpperCase(Locale.US);
@@ -845,10 +970,7 @@ public final class JaguarStypeSupport
         for (EcuDataItem item : def.items)
         {
             String mnem = String.valueOf(item.pv.get(EcuDataPv.FID_MNEMONIC));
-            if (!EcuDataItems.byMnemonic.containsKey(mnem))
-            {
-                EcuDataItems.byMnemonic.put(mnem, item);
-            }
+            EcuDataItems.byMnemonic.put(mnem, item);
             if (pidPvs != null && !pidPvs.containsKey(item.toString()))
             {
                 if (newEntries == null)
@@ -948,12 +1070,13 @@ public final class JaguarStypeSupport
             int code16 = pair[0];
             int mappedSvc = pair[1];
             Integer key = Integer.valueOf(code16);
-            EcuCodeItem codeItem = knownCodes != null ? knownCodes.get(key) : null;
-            if (codeItem == null)
-            {
-                codeItem = new ObdCodeItem(code16,
-                        Messages.getString("customer.specific.trouble.code.see.manual"));
-            }
+            boolean alreadyPresent = tCodes.containsKey(key);
+
+            EcuCodeItem known = knownCodes != null ? knownCodes.get(key) : null;
+            String desc = (known != null && known.get(EcuCodeItem.FID_DESCRIPT) != null)
+                    ? String.valueOf(known.get(EcuCodeItem.FID_DESCRIPT))
+                    : Messages.getString("customer.specific.trouble.code.see.manual");
+            ObdCodeItem codeItem = new ObdCodeItem(code16, desc);
             codeItem.put(EcuCodeItem.FID_STATUS, Integer.valueOf(mappedSvc));
             if (modTag != null)
             {
@@ -964,7 +1087,7 @@ public final class JaguarStypeSupport
             tCodes.put(key, codeItem);
 
             String codeStr = String.valueOf(codeItem.get(EcuCodeItem.FID_CODE));
-            if (!isSystemPassCode(codeStr) && !isReadinessInfoCode(codeStr))
+            if (!alreadyPresent && !isSystemPassCode(codeStr) && !isReadinessInfoCode(codeStr))
             {
                 realFaultCount++;
             }

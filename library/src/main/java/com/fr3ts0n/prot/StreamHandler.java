@@ -26,6 +26,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.util.Vector;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -38,8 +41,19 @@ import java.util.logging.Logger;
 public class StreamHandler implements TelegramWriter, Runnable
 {
 	private static final Logger log = Logger.getLogger("stream");
-	private InputStream in;
-	private BufferedWriter out;
+	private volatile InputStream in;
+	private volatile BufferedWriter out;
+	private final Object writeLock = new Object();
+	private final ExecutorService txExecutor = Executors.newSingleThreadExecutor(new ThreadFactory()
+	{
+		@Override
+		public Thread newThread(Runnable r)
+		{
+			Thread t = new Thread(r, "ObdStreamTx");
+			t.setDaemon(true);
+			return t;
+		}
+	});
 	
 	private TelegramListener messageHandler;
 	// current receive message
@@ -69,9 +83,15 @@ public class StreamHandler implements TelegramWriter, Runnable
 	public void setStreams(InputStream inStream, OutputStream outStream)
 	{
 		in = inStream;
-		/* Output uses BufferedWriter with buffer size 1 byte to trigger
-		   flushing on every outgoing byte [$Fix #AndrOBD-27] */
-		out = new BufferedWriter(new OutputStreamWriter(outStream), 1);
+		synchronized (writeLock)
+		{
+			/* Output uses BufferedWriter with buffer size 1 byte to trigger
+			   flushing on every outgoing byte [$Fix #AndrOBD-27] */
+			out = (outStream != null)
+					? new BufferedWriter(new OutputStreamWriter(outStream), 1)
+					: null;
+		}
+		message = "";
 	}
 	
 	/* (non-Javadoc)
@@ -89,32 +109,42 @@ public class StreamHandler implements TelegramWriter, Runnable
 	@Override
 	public int writeTelegram(final char[] buffer, int type, Object id)
 	{
-		int result = buffer.length;
+		if (buffer == null)
+		{
+			return 0;
+		}
+		final char[] snapshot = buffer.clone();
+		int result = snapshot.length;
 		
-		// Send data threaded to de-couple from main thread
-		new Thread(new Runnable()
+		// Serialize TX strictly in FIFO order off the UI thread
+		txExecutor.execute(new Runnable()
 		{
 			@Override
 			public void run()
 			{
 				try
 				{
-					String msg = new String(buffer);
-					msg += "\r";
+					String msg = new String(snapshot) + "\r";
 					
-					log.finer(this.toString() + " TX:"
+					log.finer(StreamHandler.this.toString() + " TX:"
 					          + ProtUtils.hexDumpBuffer(msg.toCharArray()));
 					
-					out.write(msg.toCharArray());
-					out.flush();
+					synchronized (writeLock)
+					{
+						if (out != null)
+						{
+							out.write(msg.toCharArray());
+							out.flush();
+						}
+					}
 				}
 				catch (Exception ex)
 				{
 					log.log(Level.SEVERE, "TX error:'"
-					           + ProtUtils.hexDumpBuffer(buffer) + "'", ex);
+					           + ProtUtils.hexDumpBuffer(snapshot) + "'", ex);
 				}
 			}
-		}).start();
+		});
 		return (result);
 	}
 	
@@ -132,8 +162,9 @@ public class StreamHandler implements TelegramWriter, Runnable
 		
 		switch (chr)
 		{
-			// ignore special characters
+			// ignore spaces and DEL
 			case 32:
+			case 127:
 				break;
 			
 			// trigger message handling for new request
@@ -155,7 +186,11 @@ public class StreamHandler implements TelegramWriter, Runnable
 				break;
 			
 			default:
-				message += (char) chr;
+				// Ignore UART glitch/control bytes (< 32, e.g. 0x00 during ELM327 ATZ reset)
+				if (chr >= 32)
+				{
+					message += (char) chr;
+				}
 		}
 	}
 	
@@ -170,34 +205,13 @@ public class StreamHandler implements TelegramWriter, Runnable
 		log.info("RX Thread started");
 		try
 		{
-			// loop until stream closed / invalid
-			while (true)
+			InputStream stream = in;
+			while (stream != null && (chr = stream.read()) >= 0)
 			{
-				// if no data available, then wait for it
-				if (in.available() > 0)
-				{
-					// otherwise read- and process ...
-					
-					// Is end of stream reached?
-					if ((chr = in.read()) > 0)
-					{
-						// process incoming data
-						processRxChar(chr);
-					}
-					else
-					{
-						log.warning(this.toString() + " RX: End of stream!");
-						// stream finished - break loop
-						break;
-					}
-				}
-				else
-				{
-					// wait 1 ms for incoming data
-					Thread.sleep(1);
-				}
-				
+				processRxChar(chr);
+				stream = in;
 			}
+			log.warning(this.toString() + " RX: End of stream!");
 		}
 		catch (Exception ex)
 		{
