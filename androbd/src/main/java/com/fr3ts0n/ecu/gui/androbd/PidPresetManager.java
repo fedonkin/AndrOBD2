@@ -3,6 +3,7 @@ package com.fr3ts0n.ecu.gui.androbd;
 import android.content.SharedPreferences;
 
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
 import java.util.Arrays;
@@ -28,8 +29,28 @@ public class PidPresetManager
         FAVORITES,
         STARTUP,
         FUEL,
-        DRIVING
+        DRIVING,
+        JAGUAR_TRANS,
+        JAGUAR_VVT,
+        JAGUAR_ALL;
+
+        public boolean isJaguarPreset()
+        {
+            return this == JAGUAR_TRANS || this == JAGUAR_VVT || this == JAGUAR_ALL;
+        }
     }
+
+    /** Jaguar S-Type Gearbox / Oil / Thermal Mode 01 + Mode 22 PIDs */
+    private static final Set<Integer> JAGUAR_TRANS_PIDS = unmodifiablePidSet(
+            0x0C, 0x0D, 0x05, 0x42,
+            0x1674, 0x11BD, 0x11B8, 0x11B3, 0x1310, 0x162B, 0x163F
+    );
+
+    /** Jaguar S-Type VVT, IMT Intake Valve & Mixture Mode 01 + Mode 22 PIDs */
+    private static final Set<Integer> JAGUAR_VVT_PIDS = unmodifiablePidSet(
+            0x0C, 0x06, 0x07, 0x08, 0x09, 0x10, 0x0B, 0x0E,
+            0x16CF, 0x091E, 0x16CD, 0x16CE, 0x1103, 0x123B
+    );
 
     /** Startup, idle & warm-up diagnostics PIDs */
     private static final Set<Integer> STARTUP_PIDS = unmodifiablePidSet(
@@ -196,11 +217,25 @@ public class PidPresetManager
         switch (preset)
         {
             case STARTUP:
-                return STARTUP_PIDS.contains(pid);
+                return STARTUP_PIDS.contains(pid)
+                        || (JaguarStypeSupport.isEnabled()
+                            && (pid == 0x1310 || pid == 0x162B || pid == 0x1155));
             case FUEL:
-                return FUEL_PIDS.contains(pid);
+                return FUEL_PIDS.contains(pid)
+                        || (JaguarStypeSupport.isEnabled() && (pid == 0x1103 || pid == 0x123B));
             case DRIVING:
-                return DRIVING_PIDS.contains(pid);
+                return DRIVING_PIDS.contains(pid)
+                        || (JaguarStypeSupport.isEnabled()
+                            && (pid == 0x1674 || pid == 0x11BD || pid == 0x11B8
+                                || pid == 0x11B3 || pid == 0x1310));
+            case JAGUAR_TRANS:
+                return JaguarStypeSupport.isEnabled() && JAGUAR_TRANS_PIDS.contains(pid);
+            case JAGUAR_VVT:
+                return JaguarStypeSupport.isEnabled() && JAGUAR_VVT_PIDS.contains(pid);
+            case JAGUAR_ALL:
+                return JaguarStypeSupport.isEnabled()
+                        && (JaguarStypeSupport.isMode22Pid(pid)
+                            || pid == 0x0C || pid == 0x05 || pid == 0x42);
             default:
                 return true;
         }
@@ -234,6 +269,29 @@ public class PidPresetManager
             result.addAll(DRIVING_PIDS);
             return result;
         }
+        if (preset == Preset.JAGUAR_TRANS)
+        {
+            for (Integer p : JAGUAR_TRANS_PIDS)
+            {
+                if (p < 0x0100) result.add(p);
+            }
+            return result;
+        }
+        if (preset == Preset.JAGUAR_VVT)
+        {
+            for (Integer p : JAGUAR_VVT_PIDS)
+            {
+                if (p < 0x0100) result.add(p);
+            }
+            return result;
+        }
+        if (preset == Preset.JAGUAR_ALL)
+        {
+            result.add(0x0C);
+            result.add(0x05);
+            result.add(0x42);
+            return result;
+        }
         if (preset == Preset.FAVORITES && availablePidItems != null && favorites != null)
         {
             Object[] snap = availablePidItems.toArray();
@@ -242,7 +300,7 @@ public class PidPresetManager
                 if (item instanceof EcuDataPv && isFavorite(favorites, item))
                 {
                     int pid = safeInt(((EcuDataPv) item).get(EcuDataPv.FID_PID));
-                    if (pid > 0)
+                    if (pid > 0 && pid < 0x0100)
                     {
                         result.add(pid);
                     }

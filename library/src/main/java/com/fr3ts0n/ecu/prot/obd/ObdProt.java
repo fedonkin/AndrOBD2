@@ -63,6 +63,12 @@ public class ObdProt extends ProtoHeader
     public static final int OBD_SVC_CTRL_MODE = 0x08;
     public static final int OBD_SVC_VEH_INFO = 0x09;
     public static final int OBD_SVC_PERMACODES = 0x0A;
+    public static final int OBD_SVC_DIAG_SESSION = 0x10;
+    public static final int OBD_SVC_MOD_CODES_13 = 0x13;
+    public static final int OBD_SVC_MOD_CLEAR_14 = 0x14;
+    public static final int OBD_SVC_MOD_CODES_18 = 0x18;
+    public static final int OBD_SVC_MOD_CODES_19 = 0x19;
+    public static final int OBD_SVC_EXT_DATA = 0x22;
 
     /** negative response ID */
     private static final int OBD_ID_NRC = 0x7F;
@@ -323,10 +329,16 @@ public class ObdProt extends ProtoHeader
                 fldMap = FRZFRM_PARAMETERS;
                 break;
 
+            case OBD_SVC_NONE:
             case OBD_SVC_READ_CODES:
             case OBD_SVC_PENDINGCODES:
             case OBD_SVC_PERMACODES:
             case OBD_SVC_CLEAR_CODES:
+            case OBD_SVC_DIAG_SESSION:
+            case OBD_SVC_MOD_CODES_13:
+            case OBD_SVC_MOD_CLEAR_14:
+            case OBD_SVC_MOD_CODES_18:
+            case OBD_SVC_MOD_CODES_19:
                 fldMap = SVC_PARAMETERS;
                 break;
 
@@ -540,6 +552,17 @@ public class ObdProt extends ProtoHeader
         return result;
     }
 
+    synchronized boolean hasSupportedPids()
+    {
+        return !pidSupported.isEmpty();
+    }
+
+    protected synchronized void prepareModuleScanReset()
+    {
+        tCodes.clear();
+        setNumCodes(0);
+    }
+
     /**
      * handle OBD response telegram
      * @param buffer - telegram buffer
@@ -551,6 +574,23 @@ public class ObdProt extends ProtoHeader
     {
         int result = 0;
         int msgPid;
+
+        if (JaguarStypeSupport.isEnabled() && buffer != null && buffer.length == 2)
+        {
+            String shortHex = new String(buffer);
+            if ("53".equalsIgnoreCase(shortHex) || "58".equalsIgnoreCase(shortHex))
+            {
+                if (tCodes.isEmpty())
+                {
+                    tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+                }
+                return result;
+            }
+            if ("50".equalsIgnoreCase(shortHex) || "54".equalsIgnoreCase(shortHex))
+            {
+                return result;
+            }
+        }
 
         if (checkTelegram(buffer))
         {
@@ -564,6 +604,23 @@ public class ObdProt extends ProtoHeader
                     int svc = (Integer) getParamValue(ID_NR_SVC, buffer);
                     // get NRC code
                     int nrcCode = (Integer) getParamValue(ID_NR_CODE, buffer);
+                    // Non-destructive handling for optional Jaguar S-Type Mode 22 & module services
+                    if (JaguarStypeSupport.isEnabled()
+                            && (svc == OBD_SVC_EXT_DATA
+                                || svc == OBD_SVC_MOD_CODES_13
+                                || svc == OBD_SVC_MOD_CODES_18
+                                || svc == OBD_SVC_MOD_CODES_19
+                                || svc == OBD_SVC_DIAG_SESSION
+                                || svc == OBD_SVC_MOD_CLEAR_14))
+                    {
+                        if (nrcCode != NRC.RCRRP.code)
+                        {
+                            JaguarStypeSupport.onOptionalCommandFailed(svc, nrcCode, lastTxMsg);
+                        }
+                        log.fine(String.format("Optional Jaguar service 0x%02X NRC 0x%02X (%s)",
+                                svc, nrcCode, lastTxMsg));
+                        return result;
+                    }
                     // get NRC object
                     NRC nrc = NRC.get(nrcCode);
                     // create NRC error message
@@ -733,6 +790,15 @@ public class ObdProt extends ProtoHeader
                                 log.fine(String.format("+DFC: %04x: %s", key, code.toString()));
                                 // Remember received message service to know code status
                                 code.put(EcuCodeItem.FID_STATUS, Integer.valueOf(msgService));
+                                if (JaguarStypeSupport.isEnabled())
+                                {
+                                    JaguarStypeSupport.DiagModule mod = JaguarStypeSupport.getActiveModule();
+                                    if (mod != null && mod != JaguarStypeSupport.DiagModule.ENGINE_OBD)
+                                    {
+                                        code.put(JaguarStypeSupport.CODE_FIELD_MODULE, mod.shortTag);
+                                    }
+                                    tCodes.remove(Integer.valueOf(0));
+                                }
                                 tCodes.put(key, code);
                                 // if number of codes hasn't been delivered yet ...
                                 if(!hasNumCodes)
@@ -742,7 +808,7 @@ public class ObdProt extends ProtoHeader
                                 }
                             }
                         }
-                        if (nCodes == 0)
+                        if (nCodes == 0 && (!JaguarStypeSupport.isEnabled() || tCodes.isEmpty()))
                         {
                             tCodes.put(0, new ObdCodeItem(0, Messages.getString(
                                     "no.trouble.codes.set")));
@@ -751,6 +817,37 @@ public class ObdProt extends ProtoHeader
 
                     // clear code response
                     case OBD_SVC_CLEAR_CODES:
+                    case OBD_SVC_DIAG_SESSION:
+                    case OBD_SVC_MOD_CLEAR_14:
+                        break;
+
+                    // Jaguar S-Type Mode 0x22 extended PID response (62 XX XX <data...>)
+                    case OBD_SVC_EXT_DATA:
+                        if (JaguarStypeSupport.isEnabled() && buffer.length >= 8)
+                        {
+                            int pid16 = Integer.parseInt(new String(buffer, 2, 4), 16);
+                            char[] payloadBytes = hexToBytes(new String(buffer, 6, buffer.length - 6));
+                            JaguarStypeSupport.onMode22Response(pid16, payloadBytes, PidPvs);
+                        }
+                        break;
+
+                    // Jaguar S-Type multi-module DTC responses (53..., 58..., 59...)
+                    case OBD_SVC_MOD_CODES_13:
+                    case OBD_SVC_MOD_CODES_18:
+                    case OBD_SVC_MOD_CODES_19:
+                        if (JaguarStypeSupport.isEnabled())
+                        {
+                            int added = JaguarStypeSupport.parseModuleDtcResponse(
+                                    msgService, buffer, knownCodes, tCodes);
+                            if (added > 0)
+                            {
+                                setNumCodes(this.numCodes + added);
+                            } else if (tCodes.isEmpty())
+                            {
+                                tCodes.put(0, new ObdCodeItem(0, Messages.getString(
+                                        "no.trouble.codes.set")));
+                            }
+                        }
                         break;
 
                     default:
@@ -831,7 +928,7 @@ public class ObdProt extends ProtoHeader
      * clear data lists for selected service
      * @param obdService OBD service to clear lists for
      */
-    private void clearDataLists(int obdService)
+    protected void clearDataLists(int obdService)
     {
         // clean up data lists
         switch (obdService)

@@ -2,6 +2,8 @@ package com.fr3ts0n.ecu.gui.androbd;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.ObdCodeItem;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 
 import org.junit.Test;
@@ -34,10 +36,10 @@ public class DiagnosticReportBuilderTest
     @Test
     public void buildsReadableFaultReportWithCodesVinAndEngineSnapshot()
     {
-        EcuCodeItem c1 = new EcuCodeItem(0x0171, "System Too Lean (Bank 1)");
+        ObdCodeItem c1 = new ObdCodeItem(0x0171, "System Too Lean (Bank 1)");
         c1.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_READ_CODES));
 
-        EcuCodeItem c2 = new EcuCodeItem(0x0300, "Random/Multiple Cylinder Misfire Detected");
+        ObdCodeItem c2 = new ObdCodeItem(0x0300, "Random/Multiple Cylinder Misfire Detected");
         c2.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_PENDINGCODES));
 
         EcuDataPv vin = new EcuDataPv();
@@ -87,5 +89,60 @@ public class DiagnosticReportBuilderTest
 
         assertTrue(report.contains("Check Engine: ВЫКЛ"));
         assertTrue(report.contains("Ошибок не обнаружено"));
+    }
+
+    @Test
+    public void jaguarProfile_includesModuleTagPassStatusAndMode22Snapshot()
+    {
+        try
+        {
+            JaguarStypeSupport.setProfileByKey("jaguar_stype_auto", null);
+
+            ObdCodeItem pass = new ObdCodeItem(0x1111, "Диагностика систем завершена успешно (System Pass)");
+            pass.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_READ_CODES));
+
+            ObdCodeItem ccmFault = new ObdCodeItem(0x9265, "Привод заслонки обхода холодного воздуха — неисправность цепи");
+            ccmFault.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_READ_CODES));
+            ccmFault.put(JaguarStypeSupport.CODE_FIELD_MODULE, "CCM");
+
+            EcuDataPv tft = new EcuDataPv();
+            tft.put(EcuDataPv.FID_PID, 0x1674);
+            tft.put(EcuDataPv.FID_MNEMONIC, "jag_trans_fluid_temp");
+            tft.put(EcuDataPv.FID_DESCRIPT, "Температура масла АКПП (TFT)");
+            tft.put(EcuDataPv.FID_VALUE, 82.5f);
+            tft.put(EcuDataPv.FID_UNITS, "°C");
+
+            DiagnosticReportBuilder.Labels jagLabels = new DiagnosticReportBuilder.Labels(
+                    "Отчёт диагностики AndrOBD2",
+                    "Check Engine: ВКЛ",
+                    "Check Engine: ВЫКЛ",
+                    "Информация об авто",
+                    "Коды неисправностей",
+                    "Ошибок не обнаружено",
+                    "Подтверждён",
+                    "Ожидающий",
+                    "Постоянный",
+                    "Текущие параметры двигателя",
+                    "Норма",
+                    "Готовность",
+                    "Профиль: Jaguar S-Type",
+                    "Блок: Климат (CCM)");
+
+            String report = DiagnosticReportBuilder.buildFaultReport(
+                    1_761_210_000_000L,
+                    1,
+                    Arrays.asList(pass, ccmFault),
+                    Collections.emptyList(),
+                    Collections.singletonList(tft),
+                    jagLabels);
+
+            assertTrue(report.contains("Профиль: Jaguar S-Type | Блок: Климат (CCM)"));
+            assertTrue(report.contains("P1111 [Норма]"));
+            assertTrue(report.contains("B1265 [CCM · Подтверждён]"));
+            assertTrue(report.contains("Температура масла АКПП (TFT): 82.5 °C"));
+        } finally
+        {
+            JaguarStypeSupport.setProfileByKey("standard", null);
+        }
     }
 }

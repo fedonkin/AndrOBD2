@@ -29,6 +29,7 @@ import android.widget.TextView;
 import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
@@ -86,6 +87,8 @@ public class DfcItemAdapter extends ObdItemAdapter
 		int statusRes = R.string.dtc_status_confirmed;
 		ivIcon.setImageResource(R.drawable.ic_code);
 
+		String codeText = String.valueOf(currPv.get(EcuCodeItem.FID_CODE));
+
 		try
 		{
 			Integer svc = (Integer) currPv.get(EcuCodeItem.FID_STATUS);
@@ -106,6 +109,18 @@ public class DfcItemAdapter extends ObdItemAdapter
 		{
 		}
 
+		if (JaguarStypeSupport.isSystemPassCode(codeText))
+		{
+			ivIcon.setImageResource(R.drawable.ic_info);
+			accentColor = ContextCompat.getColor(getContext(), R.color.status_online);
+			statusRes = R.string.dtc_status_pass;
+		} else if (JaguarStypeSupport.isReadinessInfoCode(codeText))
+		{
+			ivIcon.setImageResource(R.drawable.ic_info);
+			accentColor = ContextCompat.getColor(getContext(), R.color.status_demo);
+			statusRes = R.string.dtc_status_readiness;
+		}
+
 		tintViewBackground(itemAccent, accentColor);
 		ivIcon.setColorFilter(accentColor);
 		ivIcon.setVisibility(View.VISIBLE);
@@ -113,14 +128,24 @@ public class DfcItemAdapter extends ObdItemAdapter
 		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
 		if (tvSublabel != null)
 		{
-			tvSublabel.setText(R.string.long_press_dfc_hint);
+			Object modObj = JaguarStypeSupport.isEnabled()
+					? currPv.get(JaguarStypeSupport.CODE_FIELD_MODULE)
+					: null;
+			String hint = getContext().getString(R.string.long_press_dfc_hint);
+			if (modObj != null && !String.valueOf(modObj).trim().isEmpty())
+			{
+				tvSublabel.setText("[" + String.valueOf(modObj).trim() + "] · " + hint);
+			} else
+			{
+				tvSublabel.setText(hint);
+			}
 			tvSublabel.setVisibility(View.VISIBLE);
 		}
 
 		tvValue.setVisibility(View.VISIBLE);
 		tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
 		tvValue.setTextColor(accentColor);
-		tvValue.setText(String.valueOf(currPv.get(EcuCodeItem.FID_CODE)));
+		tvValue.setText(codeText);
 
 		tvUnits.setVisibility(View.VISIBLE);
 		tvUnits.setText(statusRes);

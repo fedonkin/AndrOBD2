@@ -328,6 +328,57 @@
                             android:textColor="@color/chip_text_color"
                             android:textSize="11sp"
                             android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/chip_preset_jaguar_trans"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_jaguar_trans"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/chip_preset_jaguar_vvt"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_jaguar_vvt"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/chip_preset_jaguar_all"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_jaguar_all"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
                     </LinearLayout>
                 </HorizontalScrollView>
 
@@ -654,71 +705,112 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="7dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:visibility="gone">
 
-            <LinearLayout
-                android:id="@+id/btn_copy_dtc_report"
-                android:layout_width="0dp"
-                android:layout_height="34dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_btn_primary"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:orientation="horizontal"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp">
+            <!-- Jaguar S-Type Multi-Module Selector (strictly hidden unless Jaguar S-Type is selected) -->
+            <HorizontalScrollView
+                android:id="@+id/jaguar_module_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:scrollbars="none"
+                android:visibility="gone">
 
-                <ImageView
-                    android:layout_width="14dp"
-                    android:layout_height="14dp"
-                    android:contentDescription="@string/copy_dtc_report"
-                    android:src="@drawable/ic_copy"
-                    app:tint="@color/accent_on_primary" />
-
-                <TextView
+                <LinearLayout
+                    android:id="@+id/jaguar_module_chips_container"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:text="@string/copy_dtc_report"
-                    android:textColor="@color/accent_on_primary"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
 
             <LinearLayout
-                android:id="@+id/btn_clear_codes_bar"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_btn_danger_soft"
-                android:clickable="true"
-                android:focusable="true"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="11dp"
-                android:paddingEnd="11dp">
-
-                <ImageView
-                    android:layout_width="15dp"
-                    android:layout_height="15dp"
-                    android:contentDescription="@string/obd_clearcodes"
-                    android:src="@drawable/ic_delete"
-                    app:tint="@color/status_danger" />
+                android:orientation="horizontal">
 
                 <TextView
+                    android:id="@+id/btn_jaguar_rescan_module"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="5dp"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/bg_btn_secondary"
+                    android:clickable="true"
+                    android:ellipsize="end"
+                    android:focusable="true"
+                    android:gravity="center"
                     android:maxLines="1"
-                    android:text="@string/obd_clearcodes"
-                    android:textColor="@color/status_danger"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="@string/jaguar_scan_module"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/btn_copy_dtc_report"
+                    android:layout_width="0dp"
+                    android:layout_height="34dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_btn_primary"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp">
+
+                    <ImageView
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:contentDescription="@string/copy_dtc_report"
+                        android:src="@drawable/ic_copy"
+                        app:tint="@color/accent_on_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/copy_dtc_report"
+                        android:textColor="@color/accent_on_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/btn_clear_codes_bar"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_btn_danger_soft"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp">
+
+                    <ImageView
+                        android:layout_width="15dp"
+                        android:layout_height="15dp"
+                        android:contentDescription="@string/obd_clearcodes"
+                        android:src="@drawable/ic_delete"
+                        app:tint="@color/status_danger" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:maxLines="1"
+                        android:text="@string/obd_clearcodes"
+                        android:textColor="@color/status_danger"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

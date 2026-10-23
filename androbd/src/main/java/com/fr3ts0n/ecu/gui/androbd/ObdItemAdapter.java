@@ -40,6 +40,7 @@ import com.fr3ts0n.ecu.Conversion;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.HashConversion;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
@@ -292,6 +293,20 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             if (pv != null)
                 filtered.add(pv);
         }
+        if (JaguarStypeSupport.isEnabled())
+        {
+            for (Object val : pvs.values())
+            {
+                if (val instanceof EcuDataPv)
+                {
+                    int pid = ((EcuDataPv) val).getAsInt(EcuDataPv.FID_PID);
+                    if (JaguarStypeSupport.isMode22Pid(pid))
+                    {
+                        filtered.add(val);
+                    }
+                }
+            }
+        }
         return filtered;
     }
 
@@ -368,7 +383,14 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         String rawDescription = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
         String description = LiveDataRecorder.cleanDescription(pidNum, mnemonic, rawDescription, units);
         holder.tvDescr.setText(description);
-        if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
+        if (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pidNum))
+        {
+            String sub = !mnemonic.isEmpty()
+                    ? String.format(Locale.US, "22%04X · %s", Integer.valueOf(pidNum), mnemonic)
+                    : String.format(Locale.US, "22%04X", Integer.valueOf(pidNum));
+            holder.tvSublabel.setText(sub);
+            holder.tvSublabel.setVisibility(View.VISIBLE);
+        } else if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
         {
             holder.tvSublabel.setText(mnemonic);
             holder.tvSublabel.setVisibility(View.VISIBLE);

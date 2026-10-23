@@ -94,8 +94,48 @@
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginBottom="10dp"
                     android:background="@color/stroke_card" />
+
+                <!-- Vehicle Profile Row (synced with Settings -> OBD Options -> Vehicle profile) -->
+                <LinearLayout
+                    android:id="@+id/row_vehicle_profile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/vehicle_profile_title"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/btn_vehicle_profile"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:background="@drawable/bg_btn_secondary"
+                        android:clickable="true"
+                        android:ellipsize="end"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:maxLines="1"
+                        android:maxWidth="210dp"
+                        android:paddingStart="11dp"
+                        android:paddingEnd="11dp"
+                        android:text="@string/vehicle_profile_standard"
+                        android:textColor="@color/text_primary"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="match_parent"

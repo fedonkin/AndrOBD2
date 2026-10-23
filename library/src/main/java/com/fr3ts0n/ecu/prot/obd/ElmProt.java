@@ -18,13 +18,16 @@
 
 package com.fr3ts0n.ecu.prot.obd;
 
+import com.fr3ts0n.ecu.ObdCodeItem;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
 
 import java.beans.PropertyChangeEvent;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.Vector;
@@ -602,10 +605,22 @@ public class ElmProt
 	}
 	
 	/**
+	 * Jaguar S-Type multi-module scan state (only used when JaguarStypeSupport.isEnabled())
+	 */
+	private volatile boolean customModuleBusActive = false;
+	private volatile boolean moduleScanInProgress = false;
+
+	/**
 	 * reset ELM adapter
 	 */
 	public void reset()
 	{
+		customModuleBusActive = false;
+		moduleScanInProgress = false;
+		if (JaguarStypeSupport.isEnabled())
+		{
+			JaguarStypeSupport.resetSessionState();
+		}
 		// reset all learned protocol data
 		super.reset();
 		// either RESET or INFO command needs to be enabled
@@ -808,6 +823,14 @@ public class ElmProt
 					case BUSINIERR3:
 					case BUSBUSY:
 					case FBERROR:
+						if (JaguarStypeSupport.isEnabled()
+								&& (moduleScanInProgress
+								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
+						{
+							JaguarStypeSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
+							proceedAfterOptionalFailure();
+							break;
+						}
 						setStatus(STAT.DISCONNECTED);
 						// re-queue last command
 						pushTelegram(String.valueOf(lastCommand));
@@ -820,6 +843,14 @@ public class ElmProt
 						break;
 					
 					case DATAERROR:
+						if (JaguarStypeSupport.isEnabled()
+								&& (moduleScanInProgress
+								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
+						{
+							JaguarStypeSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
+							proceedAfterOptionalFailure();
+							break;
+						}
 						setStatus(STAT.DATAERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
@@ -831,11 +862,27 @@ public class ElmProt
 						break;
 					
 					case ERROR:
+						if (JaguarStypeSupport.isEnabled()
+								&& (moduleScanInProgress
+								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
+						{
+							JaguarStypeSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
+							proceedAfterOptionalFailure();
+							break;
+						}
 						setStatus(STAT.ERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
 
 					case NODATA:
+						if (JaguarStypeSupport.isEnabled()
+								&& (moduleScanInProgress
+								    || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
+						{
+							JaguarStypeSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
+							proceedAfterOptionalFailure();
+							break;
+						}
 						setStatus(STAT.NODATA);
 						// re-queue next data item
 						if (service != OBD_SVC_NONE)
@@ -873,6 +920,16 @@ public class ElmProt
 						}
 						else
 						{
+							if (moduleScanInProgress)
+							{
+								moduleScanInProgress = false;
+								setStatus(STAT.CONNECTED);
+								if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
+								{
+									tCodes.put(0, new ObdCodeItem(0,
+											Messages.getString("no.trouble.codes.set")));
+								}
+							}
 							// all queued commands are sent -> we are done initializing
 							if (status == STAT.INITIALIZING)
 							{
@@ -901,6 +958,18 @@ public class ElmProt
 								case OBD_SVC_DATA:
 								case OBD_SVC_FREEZEFRAME:
 								{
+									if (service == OBD_SVC_DATA
+											&& JaguarStypeSupport.isEnabled()
+											&& hasSupportedPids())
+									{
+										String mode22Cmd = JaguarStypeSupport.nextInterleavedMode22Command(
+												System.currentTimeMillis(), true);
+										if (mode22Cmd != null)
+										{
+											sendTelegram(mode22Cmd.toCharArray());
+											break;
+										}
+									}
 									// otherwise the next PID will be requested
 									writeTelegram(emptyBuffer, service, getNextSupportedPid());
 									// reduce OBD timeout towards minimum limit
@@ -1122,6 +1191,246 @@ public class ElmProt
 		}
 		return result;
 	}
+
+	/**
+	 * Continue draining queued commands or resume polling after an optional Jaguar command
+	 * (Mode 22 PID probe or multi-module DTC request) returns NODATA / CANERROR / NOCONN.
+	 */
+	private void proceedAfterOptionalFailure()
+	{
+		if (!cmdStack.isEmpty())
+		{
+			sendQueuedTelegram();
+			return;
+		}
+		if (moduleScanInProgress)
+		{
+			moduleScanInProgress = false;
+			setStatus(STAT.CONNECTED);
+			if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
+			{
+				tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+			}
+			return;
+		}
+		if (service == OBD_SVC_DATA || service == OBD_SVC_FREEZEFRAME)
+		{
+			setStatus(STAT.CONNECTED);
+			writeTelegram(emptyBuffer, service, getNextSupportedPid());
+		}
+	}
+
+	/**
+	 * Push an ordered list of ELM327 commands onto LIFO cmdStack so they execute in forward order.
+	 */
+	private void pushOrderedCommands(List<String> orderedCmds)
+	{
+		if (orderedCmds == null || orderedCmds.isEmpty())
+		{
+			return;
+		}
+		for (int i = orderedCmds.size() - 1; i >= 0; i--)
+		{
+			pushTelegram(orderedCmds.get(i));
+		}
+	}
+
+	private List<String> buildStandardBusRestoreCommands()
+	{
+		return Arrays.asList(
+			"ATPC",
+			"ATD",
+			"ATE0",
+			"ATL0",
+			"ATS0",
+			"ATH0",
+			createCommand(CMD.SETPROT, preferredProtocol.ordinal())
+		);
+	}
+
+	/**
+	 * Scan DTCs on a specific 2002 Jaguar S-Type module (only active when Jaguar S-Type is selected).
+	 */
+	public synchronized void scanJaguarModuleDtcs(JaguarStypeSupport.DiagModule module)
+	{
+		if (!JaguarStypeSupport.isEnabled())
+		{
+			return;
+		}
+		JaguarStypeSupport.DiagModule target =
+				(module != null) ? module : JaguarStypeSupport.DiagModule.ENGINE_OBD;
+		JaguarStypeSupport.setActiveModule(target);
+		this.service = OBD_SVC_READ_CODES;
+		cmdStack.clear();
+		prepareModuleScanReset();
+
+		if (runDemo)
+		{
+			simulateJaguarDemoDtcs(target);
+			return;
+		}
+
+		if (target == JaguarStypeSupport.DiagModule.ENGINE_OBD)
+		{
+			moduleScanInProgress = false;
+			List<String> seq = new ArrayList<String>();
+			if (customModuleBusActive)
+			{
+				seq.addAll(buildStandardBusRestoreCommands());
+				customModuleBusActive = false;
+			}
+			seq.add("0101");
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
+			pushOrderedCommands(seq);
+			sendQueuedTelegram();
+		}
+		else
+		{
+			List<String> cmds = JaguarStypeSupport.buildModuleReadCommands(
+					target, JaguarStypeSupport.getProfile());
+			if (!cmds.isEmpty())
+			{
+				customModuleBusActive = true;
+				moduleScanInProgress = true;
+				pushOrderedCommands(cmds);
+				sendQueuedTelegram();
+			}
+		}
+	}
+
+	/**
+	 * Clear DTCs on a specific 2002 Jaguar S-Type module and re-scan to confirm.
+	 */
+	public synchronized void clearJaguarModuleDtcs(JaguarStypeSupport.DiagModule module)
+	{
+		if (!JaguarStypeSupport.isEnabled())
+		{
+			return;
+		}
+		JaguarStypeSupport.DiagModule target =
+				(module != null) ? module : JaguarStypeSupport.DiagModule.ENGINE_OBD;
+		JaguarStypeSupport.setActiveModule(target);
+		cmdStack.clear();
+		prepareModuleScanReset();
+
+		if (runDemo)
+		{
+			tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+			return;
+		}
+
+		if (target == JaguarStypeSupport.DiagModule.ENGINE_OBD)
+		{
+			moduleScanInProgress = false;
+			List<String> seq = new ArrayList<String>();
+			if (customModuleBusActive)
+			{
+				seq.addAll(buildStandardBusRestoreCommands());
+				customModuleBusActive = false;
+			}
+			seq.add("04");
+			seq.add("0101");
+			seq.add("03");
+			seq.add("07");
+			this.service = OBD_SVC_READ_CODES;
+			pushOrderedCommands(seq);
+			sendQueuedTelegram();
+		}
+		else
+		{
+			List<String> seq = new ArrayList<String>();
+			seq.addAll(JaguarStypeSupport.buildModuleClearCommands(
+					target, JaguarStypeSupport.getProfile()));
+			seq.addAll(JaguarStypeSupport.buildModuleReadCommands(
+					target, JaguarStypeSupport.getProfile()));
+			if (!seq.isEmpty())
+			{
+				this.service = OBD_SVC_READ_CODES;
+				customModuleBusActive = true;
+				moduleScanInProgress = true;
+				pushOrderedCommands(seq);
+				sendQueuedTelegram();
+			}
+		}
+	}
+
+	private void simulateJaguarDemoDtcs(JaguarStypeSupport.DiagModule module)
+	{
+		switch (module)
+		{
+			case PCM_SCP:
+			case ECM_CAN:
+				// P1111 (System Pass), P1646 (Linear O2 B1S1), P1384 (VVT B1), P1532 (IMT B2)
+				super.handleTelegram("5804111160164660138460153220".toCharArray());
+				break;
+			case TCM:
+				// P1780 (Trans Control Switch J-Gate), P0730 (Incorrect Gear Ratio)
+				super.handleTelegram("5802178060073060".toCharArray());
+				break;
+			case ABS_DSC:
+				// C1095 (5095: ABS Hydraulic Pump Motor), C1145 (5145: RF Wheel Speed Sensor)
+				super.handleTelegram("5802509560514520".toCharArray());
+				break;
+			case CCM:
+				// B1265 (9265: Cool Air Bypass Servo), U2520 (E520: CAN Timeout from ICCM)
+				super.handleTelegram("539265E520".toCharArray());
+				break;
+			case IC_PATS:
+				// B1600 (9600: PATS Transponder Not Received), U1262 (D262: SCP J1850 Bus Fault)
+				super.handleTelegram("5802960060D26220".toCharArray());
+				break;
+			case RCM:
+				// B1921 (9921: Airbag Diagnostic Monitor Ground), B1318 (9318: Battery Voltage Low)
+				super.handleTelegram("5802992160931820".toCharArray());
+				break;
+			case EPB:
+				// C1093 (5093: EPB Switch Circuit), C1D15 (5D15: Park Brake Latch Switch)
+				super.handleTelegram("58025093605D1520".toCharArray());
+				break;
+			case ENGINE_OBD:
+			default:
+				// Standard OBD + Jaguar P1111, P1646, P0171, P0174
+				super.handleTelegram("410183000000".toCharArray());
+				super.handleTelegram("4303111116460171".toCharArray());
+				super.handleTelegram("470201741384".toCharArray());
+				break;
+		}
+	}
+
+	private void simulateJaguarDemoMode22(int tick)
+	{
+		// TFT ~ 82.5 C (180.5 F -> raw = 1444 = 0x05A4)
+		int tftRaw = 1400 + (tick % 80);
+		super.handleTelegram(String.format(Locale.US, "621674%04X", Integer.valueOf(tftRaw)).toCharArray());
+		// EOT ~ 96.0 C (raw = 13600 = 0x3520)
+		int eotRaw = 13300 + (tick % 120) * 4;
+		super.handleTelegram(String.format(Locale.US, "621310%04X", Integer.valueOf(eotRaw)).toCharArray());
+		// TC Slip ~ 12..48 RPM (raw = slip * 4)
+		int slipRaw = (8 + (tick % 36)) * 4;
+		super.handleTelegram(String.format(Locale.US, "6211B8%04X", Integer.valueOf(slipRaw)).toCharArray());
+		// Current Gear 1..5 (raw = gear * 2)
+		int gearRaw = (1 + ((tick / 30) % 5)) * 2;
+		super.handleTelegram(String.format(Locale.US, "6211B3%02X", Integer.valueOf(gearRaw)).toCharArray());
+		// Cooling Fan Speed & Duty
+		int fanByte = 60 + (tick % 40);
+		super.handleTelegram(String.format(Locale.US, "62162B%02X", Integer.valueOf(fanByte)).toCharArray());
+		super.handleTelegram(String.format(Locale.US, "62163F%02X", Integer.valueOf(fanByte)).toCharArray());
+		// VVT Bank 1 & Bank 2 Duty + Angle + Error
+		int vvtDuty1 = 9800 + (tick % 60) * 80;
+		int vvtDuty2 = 9600 + (tick % 60) * 80;
+		int vvtAngle = (int) ((12 + (tick % 18)) * 12.8f);
+		super.handleTelegram(String.format(Locale.US, "6216CF%04X", Integer.valueOf(vvtDuty1)).toCharArray());
+		super.handleTelegram(String.format(Locale.US, "62091E%04X", Integer.valueOf(vvtDuty2)).toCharArray());
+		super.handleTelegram(String.format(Locale.US, "6216CD%04X", Integer.valueOf(vvtAngle)).toCharArray());
+		super.handleTelegram("6216CE0004".toCharArray());
+		// IMT Intake Valve (toggles at higher simulated RPM) & VREF ~ 5.01 V (0xFFC0)
+		super.handleTelegram(((tick % 100) > 65 ? "62110310" : "62110300").toCharArray());
+		super.handleTelegram("621155FFC0".toCharArray());
+		// Supercharger IAT2 ~ 48 C (0x58)
+		super.handleTelegram(String.format(Locale.US, "62123B%02X", Integer.valueOf(84 + (tick % 10))).toCharArray());
+	}
 	
 	// switch to exit the demo thread
 	public static boolean runDemo;
@@ -1146,14 +1455,25 @@ public class ElmProt
 				
 				setStatus(STAT.ECU_DETECT);
 				handleTelegram("SEARCHING...".toCharArray());
-				handleTelegram("7EA074100000000".toCharArray());
-				handleTelegram("486B104100BF9FA8919B".toCharArray());
-				handleTelegram("...486B104100BF9FA8919B".toCharArray());
-				handleTelegram("7E8064100000000".toCharArray());
-				handleTelegram("7E9074100000000".toCharArray());
-				handleTelegram("7EA074100000000".toCharArray());
-				// test case for issue AndrOBD/#60
-				handleTelegram("18DAF110064100BE3EB811".toCharArray());
+				if (JaguarStypeSupport.isEnabled())
+				{
+					handleTelegram("486B104100BF9FA8919B".toCharArray());
+					handleTelegram("7E8064100000000".toCharArray());
+					handleTelegram("7E9074100000000".toCharArray());
+					handleTelegram("768074100000000".toCharArray());
+					handleTelegram("7CC074100000000".toCharArray());
+				}
+				else
+				{
+					handleTelegram("7EA074100000000".toCharArray());
+					handleTelegram("486B104100BF9FA8919B".toCharArray());
+					handleTelegram("...486B104100BF9FA8919B".toCharArray());
+					handleTelegram("7E8064100000000".toCharArray());
+					handleTelegram("7E9074100000000".toCharArray());
+					handleTelegram("7EA074100000000".toCharArray());
+					// test case for issue AndrOBD/#60
+					handleTelegram("18DAF110064100BE3EB811".toCharArray());
+				}
 				setStatus(STAT.ECU_DETECTED);
 				
 				while (runDemo)
@@ -1164,6 +1484,15 @@ public class ElmProt
 						case OBD_SVC_READ_CODES:
 						case OBD_SVC_PENDINGCODES:
 						case OBD_SVC_PERMACODES:
+							if (JaguarStypeSupport.isEnabled())
+							{
+								if (tCodes.isEmpty())
+								{
+									simulateJaguarDemoDtcs(JaguarStypeSupport.getActiveModule());
+								}
+								Thread.sleep(500);
+								break;
+							}
 							// simulate 12 TCs set as multy line response
 							// number of codes = 12 + MIL ON
 							handleTelegram("41018C000000".toCharArray());
@@ -1200,6 +1529,12 @@ public class ElmProt
 									service == OBD_SVC_DATA ? "4%X%02X%02X%02X%02X%02X"
 									                        : "4%X%02X00%02X%02X%02X%02X",
 									service, pid, value, value, value, value).toCharArray());
+								if (service == OBD_SVC_DATA
+										&& JaguarStypeSupport.isEnabled()
+										&& (value % 12 == 0))
+								{
+									simulateJaguarDemoMode22(value);
+								}
 							}
 							else
 							{
@@ -1301,6 +1636,63 @@ public class ElmProt
 		{
 			log.info("OBD Service: " + this.service + "->" + service);
 			this.service = service;
+			moduleScanInProgress = false;
+
+			// If we previously targeted a custom Jaguar module (CCM / ABS / TCM / etc.)
+			// and are now switching back to standard OBD services (Live Data, Freeze Frame, Veh Info),
+			// restore default ELM327 headers & protocol before starting the service!
+			if (customModuleBusActive && service != OBD_SVC_NONE && service != OBD_SVC_CAN_MONITOR)
+			{
+				if (service != OBD_SVC_READ_CODES
+						|| JaguarStypeSupport.getActiveModule() == JaguarStypeSupport.DiagModule.ENGINE_OBD)
+				{
+					customModuleBusActive = false;
+					cmdStack.clear();
+					if (clearLists)
+					{
+						clearDataLists(service);
+					}
+					List<String> seq = new ArrayList<String>(buildStandardBusRestoreCommands());
+					if (service == OBD_SVC_DATA
+							|| service == OBD_SVC_FREEZEFRAME
+							|| service == OBD_SVC_VEH_INFO
+							|| service == OBD_SVC_CTRL_MODE)
+					{
+						seq.add(String.format(Locale.US, "%02X00", Integer.valueOf(service)));
+					}
+					else if (service == OBD_SVC_READ_CODES)
+					{
+						seq.add("0101");
+						seq.add("0A");
+						seq.add("07");
+						seq.add("03");
+					}
+					else if (service == OBD_SVC_CLEAR_CODES)
+					{
+						seq.add("04");
+					}
+					pushOrderedCommands(seq);
+					sendQueuedTelegram();
+					return;
+				}
+			}
+
+			// If Jaguar mode is active and a non-engine module is currently selected on Fault Codes,
+			// delegate OBD_SVC_READ_CODES / OBD_SVC_CLEAR_CODES to the Jaguar module scanner.
+			if (JaguarStypeSupport.isEnabled()
+					&& JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD)
+			{
+				if (service == OBD_SVC_READ_CODES)
+				{
+					scanJaguarModuleDtcs(JaguarStypeSupport.getActiveModule());
+					return;
+				}
+				if (service == OBD_SVC_CLEAR_CODES)
+				{
+					clearJaguarModuleDtcs(JaguarStypeSupport.getActiveModule());
+					return;
+				}
+			}
 			
 			// send corresponding command(s)
 			switch (service)

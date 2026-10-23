@@ -50,6 +50,7 @@ import java.util.Locale;
 
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 
 import java.util.HashSet;
@@ -71,6 +72,7 @@ public class SettingsActivity extends AppCompatActivity
 	static final String KEY_DATA_ITEMS = "data_items";
 	static final String KEY_PROT_SELECT = "protocol";
 	static final String KEY_COMM_MEDIUM = "comm_medium";
+	static final String KEY_VEHICLE_PROFILE = JaguarStypeSupport.PREF_KEY_VEHICLE_PROFILE;
 	static final String ELM_MIN_TIMEOUT = "elm_min_timeout";
 	static final String ELM_CMD_DISABLE = "elm_cmd_disable";
 	private static final String KEY_APP_LANGUAGE = "app_language";
@@ -100,6 +102,7 @@ public class SettingsActivity extends AppCompatActivity
 			activity.createConfigurationContext(config);
 		}
 		resources.updateConfiguration(config, resources.getDisplayMetrics());
+		JaguarStypeSupport.refreshLabels();
 	}
 
 	@Override
@@ -227,6 +230,8 @@ public class SettingsActivity extends AppCompatActivity
 				setPrefsText(key);
 			}
 
+			// set up vehicle profile selection
+			setupVehicleProfileSelection();
 			// set up communication media selection
 			setupCommMediaSelection();
 			// set up protocol selection
@@ -421,6 +426,21 @@ public class SettingsActivity extends AppCompatActivity
 			pref.setSummary(pref.getEntry());
 		}
 
+		void setupVehicleProfileSelection()
+		{
+			ListPreference pref = (ListPreference) findPreference(KEY_VEHICLE_PROFILE);
+			if (pref == null) return;
+			if (pref.getValue() == null || pref.getValue().isEmpty())
+			{
+				pref.setValue("standard");
+			}
+			CharSequence entry = pref.getEntry();
+			if (entry != null)
+			{
+				pref.setSummary(entry);
+			}
+		}
+
 		/**
 		 * set up selection for PIDs
 		 */
@@ -431,7 +451,11 @@ public class SettingsActivity extends AppCompatActivity
 			if (itemList == null) return;
 
 			// collect data items for selection
-			items = ObdProt.dataItems.getSvcDataItems(ObdProt.OBD_SVC_DATA);
+			items = new Vector<EcuDataItem>(ObdProt.dataItems.getSvcDataItems(ObdProt.OBD_SVC_DATA));
+			if (JaguarStypeSupport.isEnabled())
+			{
+				items.addAll(JaguarStypeSupport.getAllMode22DataItems());
+			}
 			HashSet<String> selections = new HashSet<>();
 			CharSequence[] titles = new CharSequence[items.size()];
 			CharSequence[] keys = new CharSequence[items.size()];
@@ -618,6 +642,14 @@ public class SettingsActivity extends AppCompatActivity
 
 			if(KEY_COMM_MEDIUM.equals(key))
 				updateNetworkSelections();
+
+			if(KEY_VEHICLE_PROFILE.equals(key))
+			{
+				JaguarStypeSupport.setProfileByKey(
+					sharedPreferences.getString(KEY_VEHICLE_PROFILE, "standard"),
+					ObdProt.PidPvs);
+				setupPidSelection();
+			}
 
 			if(ELM_TIMING_SELECT.equals(key))
 				//noinspection ConstantConditions

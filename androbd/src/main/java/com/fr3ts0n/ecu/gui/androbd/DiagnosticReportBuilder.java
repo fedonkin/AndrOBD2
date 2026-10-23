@@ -2,6 +2,7 @@ package com.fr3ts0n.ecu.gui.androbd;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
@@ -35,6 +36,10 @@ public class DiagnosticReportBuilder
         public final String statusPending;
         public final String statusPermanent;
         public final String sectionSnapshot;
+        public final String statusPass;
+        public final String statusReadiness;
+        public final String profileHeaderLine;
+        public final String moduleHeaderLine;
 
         public Labels(String title,
                       String milOn,
@@ -47,6 +52,26 @@ public class DiagnosticReportBuilder
                       String statusPermanent,
                       String sectionSnapshot)
         {
+            this(title, milOn, milOff, sectionVehicle, sectionCodes, noCodes,
+                    statusConfirmed, statusPending, statusPermanent, sectionSnapshot,
+                    "OK", "Readiness", null, null);
+        }
+
+        public Labels(String title,
+                      String milOn,
+                      String milOff,
+                      String sectionVehicle,
+                      String sectionCodes,
+                      String noCodes,
+                      String statusConfirmed,
+                      String statusPending,
+                      String statusPermanent,
+                      String sectionSnapshot,
+                      String statusPass,
+                      String statusReadiness,
+                      String profileHeaderLine,
+                      String moduleHeaderLine)
+        {
             this.title = title;
             this.milOn = milOn;
             this.milOff = milOff;
@@ -57,6 +82,10 @@ public class DiagnosticReportBuilder
             this.statusPending = statusPending;
             this.statusPermanent = statusPermanent;
             this.sectionSnapshot = sectionSnapshot;
+            this.statusPass = statusPass;
+            this.statusReadiness = statusReadiness;
+            this.profileHeaderLine = profileHeaderLine;
+            this.moduleHeaderLine = moduleHeaderLine;
         }
     }
 
@@ -97,6 +126,15 @@ public class DiagnosticReportBuilder
             sb.append(" (DTC: ").append(ecuReportedCount).append(')');
         }
         sb.append("\n");
+        if (labels.profileHeaderLine != null && !labels.profileHeaderLine.isEmpty())
+        {
+            sb.append(labels.profileHeaderLine);
+            if (labels.moduleHeaderLine != null && !labels.moduleHeaderLine.isEmpty())
+            {
+                sb.append(" | ").append(labels.moduleHeaderLine);
+            }
+            sb.append('\n');
+        }
 
         // 1. Vehicle Information (VIN, Calibration ID, ECU Name, etc.) if present
         List<String> vehLines = extractVehicleLines(vidItems);
@@ -123,9 +161,15 @@ public class DiagnosticReportBuilder
                 Object descObj = item.get(EcuCodeItem.FID_DESCRIPT);
                 String code = codeObj != null ? String.valueOf(codeObj).trim() : "---";
                 String desc = descObj != null ? String.valueOf(descObj).trim() : "";
-                String status = resolveStatusText(item.get(EcuCodeItem.FID_STATUS), labels);
+                String status = resolveStatusText(code, item.get(EcuCodeItem.FID_STATUS), labels);
+                Object modObj = JaguarStypeSupport.isEnabled()
+                        ? item.get(JaguarStypeSupport.CODE_FIELD_MODULE)
+                        : null;
+                String modPrefix = (modObj != null && !String.valueOf(modObj).trim().isEmpty())
+                        ? (String.valueOf(modObj).trim() + " · ")
+                        : "";
                 sb.append("• ").append(code)
-                        .append(" [").append(status).append("] — ")
+                        .append(" [").append(modPrefix).append(status).append("] — ")
                         .append(desc).append('\n');
             }
         }
@@ -144,8 +188,16 @@ public class DiagnosticReportBuilder
         return sb.toString();
     }
 
-    private static String resolveStatusText(Object statusField, Labels labels)
+    private static String resolveStatusText(String code, Object statusField, Labels labels)
     {
+        if (JaguarStypeSupport.isSystemPassCode(code) && labels.statusPass != null)
+        {
+            return labels.statusPass;
+        }
+        if (JaguarStypeSupport.isReadinessInfoCode(code) && labels.statusReadiness != null)
+        {
+            return labels.statusReadiness;
+        }
         if (statusField instanceof Integer)
         {
             int svc = (Integer) statusField;
@@ -176,7 +228,14 @@ public class DiagnosticReportBuilder
                 list.add((IndexedProcessVar) obj);
             }
         }
-        Collections.sort(list, Comparator.comparing(Object::toString));
+        Collections.sort(list, new Comparator<IndexedProcessVar>()
+        {
+            @Override
+            public int compare(IndexedProcessVar a, IndexedProcessVar b)
+            {
+                return String.valueOf(a).compareTo(String.valueOf(b));
+            }
+        });
         return list;
     }
 
@@ -209,12 +268,23 @@ public class DiagnosticReportBuilder
             if (!(obj instanceof EcuDataPv)) continue;
             EcuDataPv pv = (EcuDataPv) obj;
             int pid = pv.getAsInt(EcuDataPv.FID_PID);
-            if (SNAPSHOT_CONTEXT_PIDS.contains(pid) && pv.get(EcuDataPv.FID_VALUE) != null)
+            boolean includePid = SNAPSHOT_CONTEXT_PIDS.contains(pid)
+                    || (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pid));
+            if (includePid && pv.get(EcuDataPv.FID_VALUE) != null)
             {
                 matching.add(pv);
             }
         }
-        Collections.sort(matching, Comparator.comparingInt(a -> a.getAsInt(EcuDataPv.FID_PID)));
+        Collections.sort(matching, new Comparator<EcuDataPv>()
+        {
+            @Override
+            public int compare(EcuDataPv a, EcuDataPv b)
+            {
+                int pa = a.getAsInt(EcuDataPv.FID_PID);
+                int pb = b.getAsInt(EcuDataPv.FID_PID);
+                return pa < pb ? -1 : (pa == pb ? 0 : 1);
+            }
+        });
         for (EcuDataPv pv : matching)
         {
             int pid = pv.getAsInt(EcuDataPv.FID_PID);

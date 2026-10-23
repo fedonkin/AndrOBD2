@@ -105,6 +105,16 @@
             android:title="@string/obd_options">
 
             <ListPreference
+                android:defaultValue="standard"
+                android:dialogTitle="@string/vehicle_profile_title"
+                android:entries="@array/vehicle_profile_options"
+                android:entryValues="@array/vehicle_profile_values"
+                android:key="vehicle_profile"
+                android:summary="@string/vehicle_profile_summary"
+                android:title="@string/vehicle_profile_title"
+                />
+
+            <ListPreference
                 android:defaultValue="1"
                 android:dialogTitle="@string/select_medium"
                 android:entries="@array/empty"

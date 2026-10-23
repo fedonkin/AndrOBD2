@@ -44,9 +44,12 @@ import android.os.Message;
 import android.preference.PreferenceManager;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.SparseBooleanArray;
+import android.util.TypedValue;
 import android.view.ActionMode;
+import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -80,6 +83,7 @@ import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
+import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.ProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
@@ -96,6 +100,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -1062,6 +1067,11 @@ public class MainActivity extends PluginManager
         if (chipWifi != null) chipWifi.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.NETWORK));
         if (chipUsb != null) chipUsb.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.USB));
 
+        View rowProfile = findViewById(R.id.row_vehicle_profile);
+        View btnProfile = findViewById(R.id.btn_vehicle_profile);
+        if (rowProfile != null) rowProfile.setOnClickListener(v -> showVehicleProfileSelectorDialog());
+        if (btnProfile != null) btnProfile.setOnClickListener(v -> showVehicleProfileSelectorDialog());
+
         View btnConnectReal = findViewById(R.id.btn_connect_real);
         if (btnConnectReal != null)
         {
@@ -1275,12 +1285,29 @@ public class MainActivity extends PluginManager
         View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
         View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
         View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
+        View chipJagTrans = mListView.findViewById(R.id.chip_preset_jaguar_trans);
+        View chipJagVvt = mListView.findViewById(R.id.chip_preset_jaguar_vvt);
+        View chipJagAll = mListView.findViewById(R.id.chip_preset_jaguar_all);
 
         if (chipAll != null) chipAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.ALL));
         if (chipFav != null) chipFav.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FAVORITES));
         if (chipStartup != null) chipStartup.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.STARTUP));
         if (chipFuel != null) chipFuel.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FUEL));
         if (chipDriving != null) chipDriving.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.DRIVING));
+        if (chipJagTrans != null) chipJagTrans.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_TRANS));
+        if (chipJagVvt != null) chipJagVvt.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_VVT));
+        if (chipJagAll != null) chipJagAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_ALL));
+
+        View btnJagRescan = mListView.findViewById(R.id.btn_jaguar_rescan_module);
+        if (btnJagRescan != null)
+        {
+            btnJagRescan.setOnClickListener(v -> {
+                if (JaguarStypeSupport.isEnabled())
+                {
+                    selectAndScanJaguarModule(JaguarStypeSupport.getActiveModule());
+                }
+            });
+        }
 
         View btnCopyDtcReport = mListView.findViewById(R.id.btn_copy_dtc_report);
         if (btnCopyDtcReport != null)
@@ -1316,6 +1343,7 @@ public class MainActivity extends PluginManager
             return;
         }
         PidPresetManager.Preset preset = mPidAdapter.getPreset();
+        JaguarStypeSupport.setJaguarPresetFocused(preset != null && preset.isJaguarPreset());
         TreeSet<Integer> fixed = PidPresetManager.computeFixedPids(
                 preset,
                 ObdProt.PidPvs.values(),
@@ -1331,18 +1359,38 @@ public class MainActivity extends PluginManager
     {
         if (mListView == null || mPidAdapter == null) return;
         PidPresetManager.Preset p = mPidAdapter.getPreset();
+        boolean jagEnabled = JaguarStypeSupport.isEnabled();
 
         View chipAll = mListView.findViewById(R.id.chip_preset_all);
         View chipFav = mListView.findViewById(R.id.chip_preset_fav);
         View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
         View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
         View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
+        View chipJagTrans = mListView.findViewById(R.id.chip_preset_jaguar_trans);
+        View chipJagVvt = mListView.findViewById(R.id.chip_preset_jaguar_vvt);
+        View chipJagAll = mListView.findViewById(R.id.chip_preset_jaguar_all);
 
         if (chipAll != null) chipAll.setSelected(p == PidPresetManager.Preset.ALL);
         if (chipFav != null) chipFav.setSelected(p == PidPresetManager.Preset.FAVORITES);
         if (chipStartup != null) chipStartup.setSelected(p == PidPresetManager.Preset.STARTUP);
         if (chipFuel != null) chipFuel.setSelected(p == PidPresetManager.Preset.FUEL);
         if (chipDriving != null) chipDriving.setSelected(p == PidPresetManager.Preset.DRIVING);
+
+        if (chipJagTrans != null)
+        {
+            chipJagTrans.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
+            chipJagTrans.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_TRANS);
+        }
+        if (chipJagVvt != null)
+        {
+            chipJagVvt.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
+            chipJagVvt.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_VVT);
+        }
+        if (chipJagAll != null)
+        {
+            chipJagAll.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
+            chipJagAll.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_ALL);
+        }
     }
 
     /**
@@ -1384,7 +1432,7 @@ public class MainActivity extends PluginManager
                 Intent chartIntent = new Intent(this, ChartActivity.class);
                 chartIntent.putExtra(ChartActivity.POSITIONS, positions);
                 chartIntent.putExtra(ChartActivity.LIVE_UPDATE,
-                        Set.of(MODE.ONLINE, MODE.DEMO).contains(getMode()));
+                        getMode() == MODE.ONLINE || getMode() == MODE.DEMO);
                 startActivityForResult(chartIntent, REQUEST_GRAPH_DISPLAY_DONE);
                 this.dataViewMode = targetMode;
                 break;
@@ -1453,6 +1501,14 @@ public class MainActivity extends PluginManager
     private void refreshHomeUi()
     {
         CommService.MEDIUM activeMedium = resolveRealMedium(prefs);
+
+        TextView btnProfile = findViewById(R.id.btn_vehicle_profile);
+        if (btnProfile != null)
+        {
+            btnProfile.setText(getShortProfileLabel() + " ▾");
+            btnProfile.setTextColor(ContextCompat.getColor(this,
+                    JaguarStypeSupport.isEnabled() ? R.color.accent_primary : R.color.text_primary));
+        }
 
         View chipBt = findViewById(R.id.chip_medium_bt);
         View chipBle = findViewById(R.id.chip_medium_ble);
@@ -1700,17 +1756,171 @@ public class MainActivity extends PluginManager
 
         View codesToolbar = mListView.findViewById(R.id.codes_toolbar);
         View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
+        View jaguarModuleBar = mListView.findViewById(R.id.jaguar_module_bar);
+        View btnJaguarRescan = mListView.findViewById(R.id.btn_jaguar_rescan_module);
         if (codesToolbar != null)
         {
             boolean isCodesSvc = (obdService == ObdProt.OBD_SVC_READ_CODES
                     || obdService == ObdProt.OBD_SVC_PENDINGCODES
                     || obdService == ObdProt.OBD_SVC_PERMACODES);
             codesToolbar.setVisibility(isCodesSvc ? View.VISIBLE : View.GONE);
+            boolean liveCodesSession = isCodesSvc && getMode() != MODE.FILE;
             if (btnClearCodesBar != null)
             {
-                btnClearCodesBar.setVisibility(getMode() != MODE.FILE ? View.VISIBLE : View.GONE);
+                btnClearCodesBar.setVisibility(liveCodesSession ? View.VISIBLE : View.GONE);
+            }
+            boolean showJaguarModules = liveCodesSession && JaguarStypeSupport.isEnabled();
+            if (jaguarModuleBar != null)
+            {
+                jaguarModuleBar.setVisibility(showJaguarModules ? View.VISIBLE : View.GONE);
+            }
+            if (btnJaguarRescan != null)
+            {
+                btnJaguarRescan.setVisibility(showJaguarModules ? View.VISIBLE : View.GONE);
+            }
+            if (showJaguarModules)
+            {
+                rebuildJaguarModuleChips();
             }
         }
+    }
+
+    private String getShortProfileLabel()
+    {
+        switch (JaguarStypeSupport.getProfile())
+        {
+            case STYPE_X200:
+                return getString(R.string.vehicle_profile_short_jaguar_x200);
+            case STYPE_X202:
+                return getString(R.string.vehicle_profile_short_jaguar_x202);
+            case STYPE_AUTO:
+                return getString(R.string.vehicle_profile_short_jaguar);
+            case NONE:
+            default:
+                return getString(R.string.vehicle_profile_standard);
+        }
+    }
+
+    private String getModuleDisplayName(JaguarStypeSupport.DiagModule module)
+    {
+        if (module == null)
+        {
+            return getString(R.string.jaguar_mod_engine_obd);
+        }
+        switch (module)
+        {
+            case PCM_SCP:
+                return getString(R.string.jaguar_mod_pcm_scp);
+            case ECM_CAN:
+                return getString(R.string.jaguar_mod_ecm_can);
+            case TCM:
+                return getString(R.string.jaguar_mod_tcm);
+            case ABS_DSC:
+                return getString(R.string.jaguar_mod_abs);
+            case CCM:
+                return getString(R.string.jaguar_mod_ccm);
+            case IC_PATS:
+                return getString(R.string.jaguar_mod_ic);
+            case RCM:
+                return getString(R.string.jaguar_mod_rcm);
+            case EPB:
+                return getString(R.string.jaguar_mod_epb);
+            case ENGINE_OBD:
+            default:
+                return getString(R.string.jaguar_mod_engine_obd);
+        }
+    }
+
+    private void showVehicleProfileSelectorDialog()
+    {
+        final String[] labels = getResources().getStringArray(R.array.vehicle_profile_options);
+        final String[] values = getResources().getStringArray(R.array.vehicle_profile_values);
+        String current = prefs.getString(SettingsActivity.KEY_VEHICLE_PROFILE, "standard");
+        int checked = 0;
+        for (int i = 0; i < values.length; i++)
+        {
+            if (values[i].equalsIgnoreCase(current))
+            {
+                checked = i;
+                break;
+            }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.vehicle_profile_title)
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    if (which >= 0 && which < values.length)
+                    {
+                        prefs.edit()
+                                .putString(SettingsActivity.KEY_VEHICLE_PROFILE, values[which])
+                                .apply();
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void rebuildJaguarModuleChips()
+    {
+        if (mListView == null || !JaguarStypeSupport.isEnabled()) return;
+        LinearLayout container = mListView.findViewById(R.id.jaguar_module_chips_container);
+        if (container == null) return;
+
+        container.removeAllViews();
+        List<JaguarStypeSupport.DiagModule> modules =
+                JaguarStypeSupport.getAvailableModules(JaguarStypeSupport.getProfile());
+        JaguarStypeSupport.DiagModule active = JaguarStypeSupport.getActiveModule();
+
+        float density = getResources().getDisplayMetrics().density;
+        int heightPx = Math.round(28f * density);
+        int padHPx = Math.round(10f * density);
+        int marginEndPx = Math.round(6f * density);
+
+        for (int i = 0; i < modules.size(); i++)
+        {
+            final JaguarStypeSupport.DiagModule mod = modules.get(i);
+            TextView chip = new TextView(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, heightPx);
+            if (i < modules.size() - 1)
+            {
+                lp.setMarginEnd(marginEndPx);
+            }
+            chip.setLayoutParams(lp);
+            chip.setBackgroundResource(R.drawable.bg_chip_selector);
+            chip.setTextColor(ContextCompat.getColorStateList(this, R.color.chip_text_color));
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(padHPx, 0, padHPx, 0);
+            chip.setMaxLines(1);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+            chip.setTypeface(chip.getTypeface(), android.graphics.Typeface.BOLD);
+            chip.setText(getModuleDisplayName(mod));
+            chip.setSelected(mod == active);
+            chip.setClickable(true);
+            chip.setFocusable(true);
+            chip.setOnClickListener(v -> selectAndScanJaguarModule(mod));
+            container.addView(chip);
+        }
+    }
+
+    private void selectAndScanJaguarModule(JaguarStypeSupport.DiagModule module)
+    {
+        if (!JaguarStypeSupport.isEnabled() || module == null) return;
+        if (getMode() == MODE.OFFLINE || getMode() == MODE.FILE) return;
+
+        JaguarStypeSupport.setActiveModule(module);
+        rebuildJaguarModuleChips();
+        String modLabel = getModuleDisplayName(module);
+        Toast.makeText(this,
+                getString(R.string.jaguar_scanning_fmt, modLabel),
+                Toast.LENGTH_SHORT).show();
+        CommService.elm.scanJaguarModuleDtcs(module);
+        if (mDfcAdapter != null)
+        {
+            mDfcAdapter.setPvList(ObdProt.tCodes);
+        }
+        refreshDataListStats();
     }
 
     private void refreshTelemetryBadges()
@@ -1893,6 +2103,14 @@ public class MainActivity extends PluginManager
 
     private void copyFaultCodeReportToClipboard()
     {
+        String profileLine = JaguarStypeSupport.isEnabled()
+                ? getString(R.string.dtc_report_profile_fmt, getShortProfileLabel())
+                : null;
+        String moduleLine = JaguarStypeSupport.isEnabled()
+                ? getString(R.string.dtc_report_module_fmt,
+                    getModuleDisplayName(JaguarStypeSupport.getActiveModule()))
+                : null;
+
         DiagnosticReportBuilder.Labels labels = new DiagnosticReportBuilder.Labels(
                 getString(R.string.dtc_report_title),
                 getString(R.string.dtc_report_mil_on),
@@ -1903,7 +2121,11 @@ public class MainActivity extends PluginManager
                 getString(R.string.dtc_status_confirmed),
                 getString(R.string.dtc_status_pending),
                 getString(R.string.dtc_status_permanent),
-                getString(R.string.dtc_report_snapshot_section));
+                getString(R.string.dtc_report_snapshot_section),
+                getString(R.string.dtc_status_pass),
+                getString(R.string.dtc_status_readiness),
+                profileLine,
+                moduleLine);
 
         String report = DiagnosticReportBuilder.buildFaultReport(
                 System.currentTimeMillis(),
@@ -2643,6 +2865,24 @@ public class MainActivity extends PluginManager
             refreshHomeUi();
         }
 
+        if (key == null || SettingsActivity.KEY_VEHICLE_PROFILE.equals(key))
+        {
+            JaguarStypeSupport.setProfileByKey(
+                    prefs.getString(SettingsActivity.KEY_VEHICLE_PROFILE, "standard"),
+                    ObdProt.PidPvs);
+            if (!JaguarStypeSupport.isEnabled()
+                    && mPidAdapter != null
+                    && mPidAdapter.getPreset().isJaguarPreset())
+            {
+                mPidAdapter.setPreset(PidPresetManager.Preset.ALL);
+            }
+            if (mPidAdapter != null)
+            {
+                mPidAdapter.setPvList(ObdProt.PidPvs);
+            }
+            refreshAllUi();
+        }
+
         if (key == null || ELM_ADAPTIVE_TIMING.equals(key))
         {
             CommService.elm.mAdaptiveTiming.setMode(
@@ -2911,6 +3151,11 @@ public class MainActivity extends PluginManager
 
     private static String describeEcuAddress(int addr)
     {
+        String jagDesc = JaguarStypeSupport.describeEcuAddress(addr);
+        if (!jagDesc.isEmpty())
+        {
+            return jagDesc;
+        }
         switch (addr)
         {
             case 0x7E8:      return "ECM (11-bit CAN)";
@@ -3674,13 +3919,26 @@ public class MainActivity extends PluginManager
 
     private void clearObdFaultCodes()
     {
-        dlgBuilder
+        final boolean isJaguarModule = JaguarStypeSupport.isEnabled()
+                && JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD;
+        final JaguarStypeSupport.DiagModule targetMod = JaguarStypeSupport.getActiveModule();
+        String msg = isJaguarModule
+                ? getString(R.string.jaguar_clear_module_fmt, getModuleDisplayName(targetMod))
+                : getString(R.string.obd_clear_info);
+
+        new AlertDialog.Builder(this)
                 .setIcon(android.R.drawable.ic_dialog_info)
                 .setTitle(R.string.obd_clearcodes)
-                .setMessage(R.string.obd_clear_info)
+                .setMessage(msg)
                 .setPositiveButton(android.R.string.yes, (dialog, which) -> {
-                    CommService.elm.setService(ObdProt.OBD_SVC_CLEAR_CODES);
-                    CommService.elm.setService(ObdProt.OBD_SVC_READ_CODES);
+                    if (isJaguarModule)
+                    {
+                        CommService.elm.clearJaguarModuleDtcs(targetMod);
+                    } else
+                    {
+                        CommService.elm.setService(ObdProt.OBD_SVC_CLEAR_CODES);
+                        CommService.elm.setService(ObdProt.OBD_SVC_READ_CODES);
+                    }
                 })
                 .setNegativeButton(android.R.string.no, null)
                 .show();

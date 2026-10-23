@@ -22,6 +22,7 @@ import com.fr3ts0n.common.UTF8Bundle;
 import com.fr3ts0n.ecu.prot.obd.Messages;
 
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.MissingResourceException;
 import java.util.ResourceBundle;
 import java.util.Set;
@@ -35,8 +36,73 @@ public class EcuCodeList
 	implements Conversion
 {
 	private static final long serialVersionUID = 219865459629423028L;
-	private final transient ResourceBundle codes;
+	private static volatile String overlayBundleName = null;
+	private static volatile Locale cachedOverlayLocale = null;
+	private static volatile String cachedOverlayName = null;
+	private static volatile ResourceBundle cachedOverlayBundle = null;
+
+	private final String baseBundleName;
+	private transient Locale cachedBaseLocale;
+	private transient ResourceBundle codes;
 	private transient int radix = 10;
+
+	/**
+	 * Activate or clear an optional vehicle-specific fault code resource bundle overlay.
+	 * Pass {@code null} to disable vehicle-specific fault codes.
+	 */
+	public static synchronized void setOverlayBundleName(String bundleName)
+	{
+		String normalized = (bundleName != null && !bundleName.trim().isEmpty())
+				? bundleName.trim()
+				: null;
+		overlayBundleName = normalized;
+		cachedOverlayName = null;
+		cachedOverlayLocale = null;
+		cachedOverlayBundle = null;
+	}
+
+	public static String getOverlayBundleName()
+	{
+		return overlayBundleName;
+	}
+
+	private static synchronized ResourceBundle resolveOverlayBundle(Locale locale)
+	{
+		String activeOverlay = overlayBundleName;
+		if (activeOverlay == null)
+		{
+			return null;
+		}
+		if (cachedOverlayBundle == null
+				|| !activeOverlay.equals(cachedOverlayName)
+				|| !locale.equals(cachedOverlayLocale))
+		{
+			try
+			{
+				cachedOverlayBundle = UTF8Bundle.getBundle(activeOverlay, locale);
+				cachedOverlayName = activeOverlay;
+				cachedOverlayLocale = locale;
+			} catch (MissingResourceException ignored)
+			{
+				cachedOverlayBundle = null;
+			}
+		}
+		return cachedOverlayBundle;
+	}
+
+	private synchronized ResourceBundle resolveBaseBundle(Locale locale)
+	{
+		if (baseBundleName == null)
+		{
+			return codes;
+		}
+		if (codes == null || !locale.equals(cachedBaseLocale))
+		{
+			codes = UTF8Bundle.getBundle(baseBundleName, locale);
+			cachedBaseLocale = locale;
+		}
+		return codes;
+	}
 
 	/**
 	 * construct a new code list
@@ -53,7 +119,9 @@ public class EcuCodeList
 	 */
 	public EcuCodeList(String resourceBundleName)
 	{
-		codes = UTF8Bundle.getBundle(resourceBundleName);
+		baseBundleName = resourceBundleName;
+		cachedBaseLocale = Locale.getDefault();
+		codes = UTF8Bundle.getBundle(resourceBundleName, cachedBaseLocale);
 	}
 
 	/**
@@ -75,21 +143,34 @@ public class EcuCodeList
 
 	public EcuCodeItem get(Number value)
 	{
-		EcuCodeItem result = null;
-		if (codes != null)
+		String key = getCode(value);
+		Locale locale = Locale.getDefault();
+
+		ResourceBundle overlay = resolveOverlayBundle(locale);
+		if (overlay != null && overlay.containsKey(key))
 		{
-			String key = getCode(value);
 			try
 			{
-				result = new EcuCodeItem(key, codes.getString(key));
-			} catch (MissingResourceException e)
+				return new EcuCodeItem(key, overlay.getString(key));
+			} catch (MissingResourceException ignored)
 			{
-				result = new EcuCodeItem(key,
-				                         Messages.getString(
-					                         "customer.specific.trouble.code.see.manual"));
 			}
 		}
-		return result;
+
+		ResourceBundle base = resolveBaseBundle(locale);
+		if (base != null)
+		{
+			try
+			{
+				return new EcuCodeItem(key, base.getString(key));
+			} catch (MissingResourceException e)
+			{
+				return new EcuCodeItem(key,
+				                       Messages.getString(
+					                       "customer.specific.trouble.code.see.manual"));
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -99,9 +180,22 @@ public class EcuCodeList
 	public Set<String> values()
 	{
 		Set<String> values = new HashSet<String>();
-		for( String key : codes.keySet())
+		Locale locale = Locale.getDefault();
+		ResourceBundle base = resolveBaseBundle(locale);
+		if (base != null)
 		{
-			values.add(codes.getString(key));
+			for (String key : base.keySet())
+			{
+				values.add(base.getString(key));
+			}
+		}
+		ResourceBundle overlay = resolveOverlayBundle(locale);
+		if (overlay != null)
+		{
+			for (String key : overlay.keySet())
+			{
+				values.add(overlay.getString(key));
+			}
 		}
 		return values;
 	}
