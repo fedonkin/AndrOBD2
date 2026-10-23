@@ -18,7 +18,6 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
-import static android.bluetooth.BluetoothDevice.ADDRESS_TYPE_PUBLIC;
 import static android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT;
 
 import android.Manifest;
@@ -33,8 +32,8 @@ import android.content.ClipboardManager;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -44,24 +43,34 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.preference.PreferenceManager;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.SparseBooleanArray;
 import android.view.ActionMode;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
 import com.fr3ts0n.androbd.plugin.Plugin;
@@ -87,6 +96,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Timer;
@@ -118,8 +128,9 @@ public class MainActivity extends PluginManager
     public static final String PREF_AUTOHIDE = "autohide_toolbar";
     public static final String PREF_FULLSCREEN = "full_screen";
     public static final String PREF_AUTOHIDE_DELAY = "autohide_delay";
+
     /**
-     * Message types sent from the BluetoothChatService Handler
+     * Message types sent from the communication service Handler
      */
     public static final int MESSAGE_STATE_CHANGE = 1;
     public static final int MESSAGE_FILE_READ = 2;
@@ -127,6 +138,7 @@ public class MainActivity extends PluginManager
     public static final int MESSAGE_TOAST = 5;
     public static final int MESSAGE_UPDATE_VIEW = 7;
     public static final int MESSAGE_TOOLBAR_VISIBLE = 12;
+
     /**
      * Mapping list from Plugin.CsvField to EcuDataPv.key
      */
@@ -138,8 +150,11 @@ public class MainActivity extends PluginManager
         EcuDataPv.FID_MAX,
         EcuDataPv.FIELDS[EcuDataPv.FID_UNITS]
     };
+
     private static final String DEVICE_ADDRESS = "device_address";
     private static final String DEVICE_PORT = "device_port";
+    private static final String DEFAULT_WIFI_ADDRESS = "192.168.0.10";
+    private static final int DEFAULT_WIFI_PORT = 35000;
     private static final String MEASURE_SYSTEM = "measure_system";
     /** legacy boolean preference key, kept only to migrate existing users' choice */
     private static final String NIGHT_MODE = "night_mode";
@@ -150,6 +165,7 @@ public class MainActivity extends PluginManager
     private static final String PREF_USE_LAST = "USE_LAST_SETTINGS";
     private static final String PREF_OVERLAY = "toolbar_overlay";
     private static final String PREF_DATA_DISABLE_MAX = "data_disable_max";
+
     private static final int MESSAGE_FILE_WRITTEN = 3;
     protected static final int MESSAGE_DATA_ITEMS_CHANGED = 6;
     private static final int MESSAGE_OBD_STATE_CHANGED = 8;
@@ -157,6 +173,7 @@ public class MainActivity extends PluginManager
     private static final int MESSAGE_OBD_ECUS = 10;
     private static final int MESSAGE_OBD_NRC = 11;
     private static final String TAG = "AndrOBD";
+
     /**
      * internal Intent request codes
      */
@@ -169,86 +186,55 @@ public class MainActivity extends PluginManager
     private static final int REQUEST_GRAPH_DISPLAY_DONE = 7;
     private static final int REQUEST_BT_PERMISSIONS = 8;
     private static final int REQUEST_NOTIFICATIONS = 9;
+
     /**
-     * app exit parameters
+     * Priority PIDs for automatic dashboard / chart quick-launch when no items are checked
      */
+    private static final int[] PRIORITY_NUMERIC_PIDS = {
+        0x0C, // Engine RPM
+        0x0D, // Vehicle Speed
+        0x05, // Coolant Temperature
+        0x04, // Calculated Engine Load
+        0x11, // Throttle Position
+        0x42, // Control Module Voltage
+        0x0F, // Intake Air Temperature
+        0x0B  // Intake Manifold Pressure
+    };
+
     private static final int EXIT_TIMEOUT = 2500;
-    /**
-     * time between display updates to represent data changes
-     */
     private static final int DISPLAY_UPDATE_TIME = 250;
     private static final String LOG_MASTER = "log_master";
     private static final String KEEP_SCREEN_ON = "keep_screen_on";
     private static final String ELM_CUSTOM_INIT_CMDS = "elm_custom_init_cmds";
-    /**
-     * Logging
-     */
+
     private static final Logger rootLogger = Logger.getLogger("");
     private static final Logger log = Logger.getLogger(TAG);
-    /**
-     * Timer for display updates
-     */
     private static Timer updateTimer;
-    /**
-     * empty string set as default parameter
-     */
     private static final Set<String> emptyStringSet = new HashSet<>();
+
     /**
      * Container for Plugin-provided data
      */
     public static PvList mPluginPvs = new PvList();
-    /**
-     * app preferences ...
-     */
+
     static SharedPreferences prefs;
-    /**
-     * dialog builder
-     */
     private static AlertDialog.Builder dlgBuilder;
-    /**
-     * Local Bluetooth adapter
-     */
     private static BluetoothAdapter mBluetoothAdapter = null;
-    /**
-     * Name of the connected BT device
-     */
     private static String mConnectedDeviceName = null;
-    /**
-     * menu object
-     */
     private static Menu menu;
-    /**
-     * Data list adapters
-     */
+
     private static ObdItemAdapter mPidAdapter;
     private static VidItemAdapter mVidAdapter;
     private static TidItemAdapter mTidAdapter;
     private static DfcItemAdapter mDfcAdapter;
     private static PluginDataAdapter mPluginDataAdapter;
     private static ObdItemAdapter currDataAdapter;
-    /**
-     * initial state of bluetooth adapter
-     */
-    private static boolean initialBtStateEnabled = false;
-    /**
-     * last time of back key pressed
-     */
-    private static long lastBackPressTime = 0;
-    /**
-     * toast for showing exit message
-     */
-    private static Toast exitToast = null;
 
-    /**
-     * Flag to temporarily ignore NRCs
-     * This flag ist used to temporarily allow negative OBD responses without issuing an error message.
-     * i.e. un-supported mode 0x0A for DFC reading
-     */
+    private static boolean initialBtStateEnabled = true;
+    private static long lastBackPressTime = 0;
+    private static Toast exitToast = null;
     private static boolean ignoreNrcs = false;
 
-    /**
-     * handler for freeze frame selection
-     */
     private final AdapterView.OnItemSelectedListener ff_selected = new AdapterView.OnItemSelectedListener()
     {
         @Override
@@ -260,50 +246,22 @@ public class MainActivity extends PluginManager
         @Override
         public void onNothingSelected(AdapterView<?> parent)
         {
-
         }
     };
-    /**
-     * Member object for the BT comm services
-     */
+
     private CommService mCommService = null;
-    
-    /**
-     * file helper
-     */
     private FileHelper fileHelper;
-    /**
-     * the local list view
-     */
     private View mListView;
-    /**
-     * current data view mode
-     */
     private DATA_VIEW_MODE dataViewMode = DATA_VIEW_MODE.LIST;
-    /**
-     * AutoHider for the toolbar
-     */
     private AutoHider toolbarAutoHider;
-    /**
-     * ExecutorService for background I/O operations
-     */
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    /**
-     * log file handler
-     */
     private FileHandler logFileHandler;
-    /**
-     * current OBD service
-     */
     private int obdService = ElmProt.OBD_SVC_NONE;
-    /**
-     * current operating mode
-     */
     private MODE mode = MODE.OFFLINE;
-    /**
-     * Handle message requests using modern Handler implementation
-     * Compatible with both old and new Android versions
-     */
+    private int lastNumCodes = 0;
+    private boolean pendingConnectAfterPermission = false;
+    private boolean pendingConnectAfterBtEnable = false;
+
     @SuppressLint("HandlerLeak")
     private transient final Handler mHandler = new Handler(Looper.getMainLooper())
     {
@@ -313,15 +271,12 @@ public class MainActivity extends PluginManager
             try
             {
                 PropertyChangeEvent evt;
-
-                // log trace message for received handler notification event
-                log.log(Level.FINEST, String.format("Handler notification: %s", msg.toString()));
+                log.log(Level.FINEST, String.format(Locale.US, "Handler notification: %s", msg));
 
                 switch (msg.what)
                 {
                     case MESSAGE_STATE_CHANGE:
-                        // log trace message for received handler notification event
-                        log.log(Level.FINEST, String.format("State change: %s", msg.toString()));
+                        log.log(Level.FINEST, String.format(Locale.US, "State change: %s", msg));
                         switch ((CommService.STATE) msg.obj)
                         {
                             case CONNECTED:
@@ -341,27 +296,27 @@ public class MainActivity extends PluginManager
                     case MESSAGE_FILE_WRITTEN:
                         break;
 
-                    // data has been read - finish up
                     case MESSAGE_FILE_READ:
-                        // set listeners for data structure changes
                         setDataListeners();
-                        // set adapters data source to loaded list instances
                         mPidAdapter.setPvList(ObdProt.PidPvs);
                         mVidAdapter.setPvList(ObdProt.VidPvs);
                         mTidAdapter.setPvList(ObdProt.VidPvs);
                         mDfcAdapter.setPvList(ObdProt.tCodes);
-                        // set OBD data mode to the one selected by input file
-                        setObdService(CommService.elm.getService(), getString(R.string.saved_data));
-                        // Check if last data selection shall be restored
+                        int loadedSvc = CommService.elm.getService();
+                        if (loadedSvc == ObdProt.OBD_SVC_NONE)
+                        {
+                            loadedSvc = ObdProt.OBD_SVC_DATA;
+                        }
+                        setObdService(loadedSvc, getString(R.string.saved_data));
                         if (obdService == ObdProt.OBD_SVC_DATA)
                         {
                             checkToRestoreLastDataSelection();
                             checkToRestoreLastViewMode();
                         }
+                        refreshAllUi();
                         break;
 
                     case MESSAGE_DEVICE_NAME:
-                        // save the connected device's name
                         mConnectedDeviceName = msg.getData().getString(DEVICE_NAME);
                         Toast.makeText(getApplicationContext(),
                                 getString(R.string.connected_to) + mConnectedDeviceName,
@@ -384,9 +339,6 @@ public class MainActivity extends PluginManager
                                 {
                                     if (event.getSource() == ObdProt.PidPvs)
                                     {
-                                        // append plugin measurements to data list
-                                        currDataAdapter.addAll(mPluginPvs.values());
-                                        // Check if last data selection shall be restored
                                         checkToRestoreLastDataSelection();
                                         checkToRestoreLastViewMode();
                                     }
@@ -394,55 +346,58 @@ public class MainActivity extends PluginManager
                                 {
                                     log.log(Level.FINER, "Error adding PV", e);
                                 }
+                                refreshDataListStats();
                                 break;
 
                             case PvChangeEvent.PV_CLEARED:
                                 currDataAdapter.clear();
+                                refreshDataListStats();
                                 break;
                         }
                         break;
 
                     case MESSAGE_UPDATE_VIEW:
-                        getListView().invalidateViews();
+                        if (getListView() != null)
+                        {
+                            getListView().invalidateViews();
+                        }
+                        refreshDataListStats();
                         break;
 
-                    // handle state change in OBD protocol
                     case MESSAGE_OBD_STATE_CHANGED:
                         evt = (PropertyChangeEvent) msg.obj;
                         ElmProt.STAT state = (ElmProt.STAT) evt.getNewValue();
-                        /* Show ELM status only in ONLINE mode */
                         if (getMode() != MODE.DEMO)
                         {
-                            setStatus(getResources().getStringArray(R.array.elmcomm_states)[state
-                                    .ordinal()]);
+                            setStatus(getResources().getStringArray(R.array.elmcomm_states)[state.ordinal()]);
                         }
-                        // if last selection shall be restored ...
-                        if (istRestoreWanted(PRESELECT.LAST_SERVICE))
+                        if (state == ElmProt.STAT.ECU_DETECTED)
                         {
-                            if (state == ElmProt.STAT.ECU_DETECTED)
+                            if (istRestoreWanted(PRESELECT.LAST_SERVICE))
                             {
-                                setObdService(prefs.getInt(PRESELECT.LAST_SERVICE.toString(), 0),
-                                        null);
+                                int restoredSvc = prefs.getInt(PRESELECT.LAST_SERVICE.toString(), ObdProt.OBD_SVC_DATA);
+                                setObdService(restoredSvc != ObdProt.OBD_SVC_NONE ? restoredSvc : ObdProt.OBD_SVC_DATA, null);
+                            } else if (obdService == ObdProt.OBD_SVC_NONE)
+                            {
+                                // Automatically open Live Data once ECU is detected so data is immediately visible
+                                setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
                             }
                         }
                         break;
 
-                    // handle change in number of fault codes
                     case MESSAGE_OBD_NUMCODES:
                         evt = (PropertyChangeEvent) msg.obj;
                         setNumCodes((Integer) evt.getNewValue());
                         break;
 
-                    // handle ECU detection event
                     case MESSAGE_OBD_ECUS:
                         evt = (PropertyChangeEvent) msg.obj;
+                        //noinspection unchecked
                         selectEcu((Set<Integer>) evt.getNewValue());
                         break;
 
-                    // handle negative result code from OBD protocol
                     case MESSAGE_OBD_NRC:
-                        // show error dialog ...
-                        if(! ignoreNrcs)
+                        if (!ignoreNrcs)
                         {
                             evt = (PropertyChangeEvent) msg.obj;
                             ObdProt.NRC nrc = (ObdProt.NRC) evt.getOldValue();
@@ -451,41 +406,37 @@ public class MainActivity extends PluginManager
                             {
                                 case ERROR:
                                     dlgBuilder
-                                        .setIcon(android.R.drawable.ic_dialog_alert)
-                                        .setTitle(R.string.obd_error)
-                                        .setMessage(nrcMsg)
-                                        .setPositiveButton(null, null)
-                                        .show();
+                                            .setIcon(android.R.drawable.ic_dialog_alert)
+                                            .setTitle(R.string.obd_error)
+                                            .setMessage(nrcMsg)
+                                            .setPositiveButton(android.R.string.ok, null)
+                                            .setNegativeButton(null, null)
+                                            .show();
                                     break;
-                                // Display warning (with confirmation)
                                 case WARN:
                                     dlgBuilder
-                                        .setIcon(android.R.drawable.ic_dialog_info)
-                                        .setTitle(R.string.obd_error)
-                                        .setMessage(nrcMsg)
-                                        .setPositiveButton(null, null)
-                                        .show();
+                                            .setIcon(android.R.drawable.ic_dialog_info)
+                                            .setTitle(R.string.obd_error)
+                                            .setMessage(nrcMsg)
+                                            .setPositiveButton(android.R.string.ok, null)
+                                            .setNegativeButton(null, null)
+                                            .show();
                                     break;
-                                // Display notification (no confirmation)
                                 case NOTIFY:
                                     Toast.makeText(getApplicationContext(),
-                                        nrcMsg,
-                                        Toast.LENGTH_SHORT).show();
+                                            nrcMsg,
+                                            Toast.LENGTH_SHORT).show();
                                     break;
-
                                 case HIDE:
                                 default:
-                                    // intentionally ignore
+                                    break;
                             }
                         }
                         break;
 
-                    // set toolbar visibility
                     case MESSAGE_TOOLBAR_VISIBLE:
                         Boolean visible = (Boolean) msg.obj;
-                        // log action
-                        log.fine(String.format("ActionBar: %s", visible ? "show" : "hide"));
-                        // set action bar visibility
+                        log.fine(String.format(Locale.US, "ActionBar: %s", visible ? "show" : "hide"));
                         final ActionBar ab = getSupportActionBar();
                         if (ab != null)
                         {
@@ -508,8 +459,6 @@ public class MainActivity extends PluginManager
 
     /**
      * Set fixed PIDs for protocol to specified list of PIDs
-     *
-     * @param pidNumbers List of PIDs
      */
     public static void setFixedPids(Set<Integer> pidNumbers)
     {
@@ -520,36 +469,65 @@ public class MainActivity extends PluginManager
             pids[i++] = pidNum;
         }
         Arrays.sort(pids);
-        // set protocol fixed PIDs
         ObdProt.setFixedPid(pids);
+    }
+
+    /**
+     * Resolve the configured real communication medium from SharedPreferences.
+     * Demo mode is a separate operating mode triggered by its own button, NEVER an adapter type:
+     * any legacy "0" (DEMO) or invalid preference value is migrated to BLUETOOTH ("1").
+     */
+    static CommService.MEDIUM resolveRealMedium(SharedPreferences prefs)
+    {
+        if (prefs == null)
+        {
+            return CommService.MEDIUM.BLUETOOTH;
+        }
+        String raw = prefs.getString(SettingsActivity.KEY_COMM_MEDIUM, null);
+        if (raw != null)
+        {
+            try
+            {
+                int idx = Integer.parseInt(raw.trim());
+                CommService.MEDIUM[] values = CommService.MEDIUM.values();
+                if (idx > 0 && idx < values.length)
+                {
+                    return values[idx];
+                }
+            } catch (NumberFormatException ignored)
+            {
+            }
+            prefs.edit()
+                    .putString(SettingsActivity.KEY_COMM_MEDIUM,
+                            String.valueOf(CommService.MEDIUM.BLUETOOTH.ordinal()))
+                    .apply();
+        }
+        return CommService.MEDIUM.BLUETOOTH;
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
-        // instantiate superclass
         super.onCreate(savedInstanceState);
 
-        // Apply locale before anything else
         SettingsActivity.applyLocale(this);
 
-        // get preferences
         prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        // register for later changes
         prefs.registerOnSharedPreferenceChangeListener(this);
 
-        // Overlay feature has to be set before window content is set
         if (prefs.getBoolean(PREF_AUTOHIDE, false)
                 && prefs.getBoolean(PREF_OVERLAY, false))
         {
             getWindow().requestFeature(Window.FEATURE_ACTION_BAR_OVERLAY);
         }
 
-        // for compatibility with newer SDK builds
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(PRIORITY_DEFAULT, new OnBackInvokedCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(PRIORITY_DEFAULT, new OnBackInvokedCallback()
+            {
                 @Override
-                public void onBackInvoked() {
+                public void onBackInvoked()
+                {
                     onBackPressed();
                 }
             });
@@ -560,69 +538,70 @@ public class MainActivity extends PluginManager
 
         dlgBuilder = new AlertDialog.Builder(this);
 
-        // Set up all data adapters
         mPidAdapter = new ObdItemAdapter(this, R.layout.obd_item, ObdProt.PidPvs);
+        mPidAdapter.setIncludePluginPvs(true);
         mVidAdapter = new VidItemAdapter(this, R.layout.obd_item, ObdProt.VidPvs);
         mTidAdapter = new TidItemAdapter(this, R.layout.obd_item, ObdProt.VidPvs);
         mDfcAdapter = new DfcItemAdapter(this, R.layout.obd_item, ObdProt.tCodes);
         mPluginDataAdapter = new PluginDataAdapter(this, R.layout.obd_item, mPluginPvs);
         currDataAdapter = mPidAdapter;
 
-        // get list view
-        mListView = getWindow().getLayoutInflater().inflate(R.layout.obd_list, null);
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        mListView = getLayoutInflater().inflate(R.layout.obd_list, contentRoot, false);
+        initDataListControls();
 
-        // Log program startup
-        log.info(String.format("%s %s starting",
+        log.info(String.format(Locale.US, "%s %s starting",
                 getString(R.string.app_name),
                 getString(R.string.app_version)));
 
-        // update all settings from preferences
         onSharedPreferenceChanged(prefs, null);
 
-        // set up logging system
         setupLoggers();
 
-        // create file helper instance
         fileHelper = new FileHelper(this);
-        // set listeners for data structure changes
         setDataListeners();
-        // automate elm status display
         CommService.elm.addPropertyChangeListener(this);
 
-        // set up action bar
         final ActionBar actionBar = getSupportActionBar();
         if (actionBar != null)
         {
             actionBar.setDisplayShowTitleEnabled(true);
-            actionBar.show(); // Ensure action bar is visible
+            actionBar.show();
         }
-        // start automatic toolbar hider
         setAutoHider(prefs.getBoolean(PREF_AUTOHIDE, false));
 
-        // set content view
         setContentView(R.layout.startup_layout);
-        
-        // Ensure menus are properly created and visible
+        bindStartupLayout();
+        setStatus(R.string.status_offline);
+
         invalidateOptionsMenu();
 
-        // handle VIEW file intent
-        if("android.intent.action.VIEW".equals(getIntent().getAction())) {
+        if ("android.intent.action.VIEW".equals(getIntent().getAction()))
+        {
             setMode(MODE.FILE);
             Uri uri = getIntent().getData();
-            loadDataFromUri(uri);
+            if (uri != null)
+            {
+                loadDataFromUri(uri);
+            }
             return;
         }
 
-        // override comm medium with USB connect intent
         if ("android.hardware.usb.action.USB_DEVICE_ATTACHED".equals(getIntent().getAction()))
         {
-            CommService.medium = CommService.MEDIUM.USB;
+            selectRealMedium(CommService.MEDIUM.USB);
+            startRealConnection();
+            return;
         }
 
-        // Request POST_NOTIFICATIONS permission on API 33+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED)
+            {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_NOTIFICATIONS);
             }
         }
 
@@ -630,209 +609,944 @@ public class MainActivity extends PluginManager
     }
 
     /**
-     * Initialize selected operation mode mode
+     * Initialize startup state WITHOUT auto-starting Demo mode.
+     * Auto-connects only if the user explicitly enabled LAST_DEV_ADDRESS auto-restore.
      */
+    @SuppressLint("MissingPermission")
     protected void initSelectedMode()
     {
         try
         {
-            switch (CommService.medium) {
-                case DEMO:
-                    setMode(MODE.DEMO);
-                    break;
-
-                case BLE:
-                case BLUETOOTH:
-                    // Get local Bluetooth adapter
-                    mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-                    log.fine("Adapter: " + mBluetoothAdapter);
-
-                    // Collect missing BT/location permissions and request them all at once
-                    ArrayList<String> missingPermissions = new ArrayList<>();
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        // API 31+: new Bluetooth permissions replace location for scanning
-                        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                            log.warning("permission.BLUETOOTH_SCAN missing");
-                            missingPermissions.add(Manifest.permission.BLUETOOTH_SCAN);
-                        }
-                        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                            log.warning("permission.BLUETOOTH_CONNECT missing");
-                            missingPermissions.add(Manifest.permission.BLUETOOTH_CONNECT);
-                        }
-                    } else {
-                        // API 23-30: location permission required for BT/BLE scan
-                        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                            log.warning("permission.ACCESS_FINE_LOCATION missing");
-                            missingPermissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
-                        }
-                    }
-                    if (!missingPermissions.isEmpty()) {
-                        ActivityCompat.requestPermissions(this, missingPermissions.toArray(new String[0]), REQUEST_BT_PERMISSIONS);
-                        return;
-                    }
-
-                    // If BT is not on, request that it be enabled.
-                    if (getMode() != MODE.DEMO && mBluetoothAdapter != null)
-                    {
-                        // remember initial bluetooth state
-                        initialBtStateEnabled = mBluetoothAdapter.isEnabled();
-                        if (!initialBtStateEnabled)
-                        {
-                            // request to enable bluetooth
-                            Intent enableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-                            startActivityForResult(enableIntent, REQUEST_ENABLE_BT);
-                        }
-                        else
-                        {
-                            // last device to be auto-connected?
-                            if(istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS))
-                            {
-                                // auto-connect ...
-                                setMode(MODE.ONLINE);
-                            }
-                            else
-                            {
-                                // leave "connect" action to the user
-                            }
-                        }
-                    }
-                    break;
-
-                case USB:
-                case NETWORK:
-                    setMode(MODE.ONLINE);
-                    break;
+            CommService.medium = resolveRealMedium(prefs);
+            mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+            if (mBluetoothAdapter != null)
+            {
+                try
+                {
+                    initialBtStateEnabled = mBluetoothAdapter.isEnabled();
+                } catch (SecurityException ignored)
+                {
+                    initialBtStateEnabled = true;
+                }
             }
-        }
-        catch (Exception ex)
+
+            if ((CommService.medium == CommService.MEDIUM.BLUETOOTH
+                    || CommService.medium == CommService.MEDIUM.BLE)
+                    && istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS)
+                    && prefs.getString(PRESELECT.LAST_DEV_ADDRESS.toString(), null) != null)
+            {
+                startRealConnection();
+            } else
+            {
+                refreshAllUi();
+            }
+        } catch (Exception ex)
         {
             log.log(Level.WARNING, "initSelectedMode:", ex);
         }
-   }
+    }
 
     /**
-     * Handler for application start event
+     * Collect missing runtime Bluetooth/Location permissions required to scan and connect.
      */
+    private String[] getMissingBtPermissions()
+    {
+        ArrayList<String> missing = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
+                    != PackageManager.PERMISSION_GRANTED)
+            {
+                missing.add(Manifest.permission.BLUETOOTH_SCAN);
+            }
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED)
+            {
+                missing.add(Manifest.permission.BLUETOOTH_CONNECT);
+            }
+        } else
+        {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED)
+            {
+                missing.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            }
+        }
+        return missing.toArray(new String[0]);
+    }
+
+    /**
+     * Update selected real adapter medium and persist it to preferences.
+     */
+    private void selectRealMedium(CommService.MEDIUM newMedium)
+    {
+        if (newMedium == null || newMedium == CommService.MEDIUM.DEMO)
+        {
+            newMedium = CommService.MEDIUM.BLUETOOTH;
+        }
+        CommService.medium = newMedium;
+        prefs.edit()
+                .putString(SettingsActivity.KEY_COMM_MEDIUM, String.valueOf(newMedium.ordinal()))
+                .apply();
+        refreshHomeUi();
+    }
+
+    /**
+     * Initiate a REAL OBD-II adapter connection (Bluetooth, BLE, Wi-Fi, or USB).
+     * Never enters Demo mode.
+     */
+    @SuppressLint("MissingPermission")
+    private void startRealConnection()
+    {
+        // Stop Demo mode cleanly if it was active
+        if (getMode() == MODE.DEMO || ElmProt.runDemo)
+        {
+            stopDemoService();
+            ObdProt.PidPvs.clear();
+            ObdProt.VidPvs.clear();
+            ObdProt.tCodes.clear();
+            this.mode = MODE.OFFLINE;
+        }
+
+        if (mCommService != null)
+        {
+            mCommService.stop();
+            mCommService = null;
+        }
+
+        CommService.medium = resolveRealMedium(prefs);
+
+        switch (CommService.medium)
+        {
+            case BLUETOOTH:
+            case BLE:
+                mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+                if (mBluetoothAdapter == null)
+                {
+                    Toast.makeText(this, R.string.bt_not_supported, Toast.LENGTH_LONG).show();
+                    setMode(MODE.OFFLINE);
+                    return;
+                }
+
+                String[] missingPerms = getMissingBtPermissions();
+                if (missingPerms.length > 0)
+                {
+                    pendingConnectAfterPermission = true;
+                    ActivityCompat.requestPermissions(this, missingPerms, REQUEST_BT_PERMISSIONS);
+                    return;
+                }
+
+                if (!mBluetoothAdapter.isEnabled())
+                {
+                    pendingConnectAfterBtEnable = true;
+                    Intent enableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                    startActivityForResult(enableIntent, REQUEST_ENABLE_BT);
+                    return;
+                }
+
+                ObdItemAdapter.allowDataUpdates = true;
+                this.mode = MODE.ONLINE;
+                setStatus(R.string.title_connecting);
+                updateMenuVisibility();
+                refreshAllUi();
+
+                boolean secure = prefs.getBoolean("bt_secure_connection", false);
+                String savedAddress = prefs.getString(PRESELECT.LAST_DEV_ADDRESS.toString(), null);
+                if (istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS)
+                        && savedAddress != null && !savedAddress.isEmpty())
+                {
+                    if (CommService.medium == CommService.MEDIUM.BLE)
+                    {
+                        connectBleDevice(savedAddress, secure);
+                    } else
+                    {
+                        connectBtDevice(savedAddress, secure);
+                    }
+                } else
+                {
+                    Intent pickerIntent = new Intent(this,
+                            CommService.medium == CommService.MEDIUM.BLE
+                                    ? BleDeviceListActivity.class
+                                    : BtDeviceListActivity.class);
+                    startActivityForResult(pickerIntent,
+                            secure ? REQUEST_CONNECT_DEVICE_SECURE : REQUEST_CONNECT_DEVICE_INSECURE);
+                }
+                break;
+
+            case USB:
+                ObdItemAdapter.allowDataUpdates = true;
+                this.mode = MODE.ONLINE;
+                setStatus(R.string.title_connecting);
+                updateMenuVisibility();
+                refreshAllUi();
+                Intent usbIntent = new Intent(this, UsbDeviceListActivity.class);
+                startActivityForResult(usbIntent, REQUEST_CONNECT_DEVICE_USB);
+                break;
+
+            case NETWORK:
+                showWifiConnectDialog();
+                break;
+
+            default:
+                selectRealMedium(CommService.MEDIUM.BLUETOOTH);
+                startRealConnection();
+                break;
+        }
+    }
+
+    /**
+     * Show clean Wi-Fi adapter IP & Port confirmation dialog before connecting.
+     */
+    private void showWifiConnectDialog()
+    {
+        String currentIp = prefs.getString(DEVICE_ADDRESS, DEFAULT_WIFI_ADDRESS);
+        if (currentIp == null || currentIp.trim().isEmpty())
+        {
+            currentIp = DEFAULT_WIFI_ADDRESS;
+        }
+        int currentPort = getPrefsInt(DEVICE_PORT, DEFAULT_WIFI_PORT);
+
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(pad, pad / 2, pad, 0);
+
+        final EditText etIp = new EditText(this);
+        etIp.setHint(R.string.device_address);
+        etIp.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        etIp.setText(currentIp);
+        container.addView(etIp);
+
+        final EditText etPort = new EditText(this);
+        etPort.setHint(R.string.device_port);
+        etPort.setInputType(InputType.TYPE_CLASS_NUMBER);
+        etPort.setText(String.valueOf(currentPort));
+        container.addView(etPort);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.wifi_connect_title)
+                .setView(container)
+                .setPositiveButton(R.string.wifi_connect_action, (dialog, which) -> {
+                    String ip = etIp.getText().toString().trim();
+                    if (ip.isEmpty()) ip = DEFAULT_WIFI_ADDRESS;
+                    int port = DEFAULT_WIFI_PORT;
+                    try
+                    {
+                        port = Integer.parseInt(etPort.getText().toString().trim());
+                    } catch (NumberFormatException ignored)
+                    {
+                    }
+                    prefs.edit()
+                            .putString(DEVICE_ADDRESS, ip)
+                            .putString(DEVICE_PORT, String.valueOf(port))
+                            .apply();
+                    ObdItemAdapter.allowDataUpdates = true;
+                    this.mode = MODE.ONLINE;
+                    setStatus(R.string.title_connecting);
+                    updateMenuVisibility();
+                    refreshAllUi();
+                    connectNetworkDevice(ip, port);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Explicitly start Demo simulation mode (only via dedicated Demo button / menu action).
+     */
+    private void startDemoMode()
+    {
+        if (mCommService != null)
+        {
+            mCommService.stop();
+            mCommService = null;
+        }
+        setMode(MODE.DEMO);
+        setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
+    }
+
+    /**
+     * Disconnect any active adapter or stop Demo mode and return cleanly to Offline home screen.
+     */
+    private void disconnectSession()
+    {
+        if (mCommService != null)
+        {
+            mCommService.stop();
+            mCommService = null;
+        }
+        stopDemoService();
+        CommService.elm.setService(ObdProt.OBD_SVC_NONE, false);
+        obdService = ObdProt.OBD_SVC_NONE;
+        dataViewMode = DATA_VIEW_MODE.LIST;
+        setMode(MODE.OFFLINE);
+        setContentView(R.layout.startup_layout);
+        bindStartupLayout();
+        final ActionBar ab = getSupportActionBar();
+        if (ab != null)
+        {
+            ab.setTitle(R.string.app_name);
+        }
+    }
+
+    /**
+     * Wire up click listeners and initial state on startup_layout.xml
+     */
+    private void bindStartupLayout()
+    {
+        View chipBt = findViewById(R.id.chip_medium_bt);
+        View chipBle = findViewById(R.id.chip_medium_ble);
+        View chipWifi = findViewById(R.id.chip_medium_wifi);
+        View chipUsb = findViewById(R.id.chip_medium_usb);
+
+        if (chipBt != null) chipBt.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.BLUETOOTH));
+        if (chipBle != null) chipBle.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.BLE));
+        if (chipWifi != null) chipWifi.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.NETWORK));
+        if (chipUsb != null) chipUsb.setOnClickListener(v -> selectRealMedium(CommService.MEDIUM.USB));
+
+        View btnConnectReal = findViewById(R.id.btn_connect_real);
+        if (btnConnectReal != null)
+        {
+            btnConnectReal.setOnClickListener(v -> {
+                if (getMode() == MODE.ONLINE)
+                {
+                    setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
+                } else
+                {
+                    startRealConnection();
+                }
+            });
+        }
+
+        View btnStartDemo = findViewById(R.id.btn_start_demo);
+        if (btnStartDemo != null)
+        {
+            btnStartDemo.setOnClickListener(v -> {
+                if (getMode() == MODE.DEMO)
+                {
+                    setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
+                } else
+                {
+                    startDemoMode();
+                }
+            });
+        }
+
+        View btnDisconnectHome = findViewById(R.id.btn_disconnect_home);
+        if (btnDisconnectHome != null)
+        {
+            btnDisconnectHome.setOnClickListener(v -> disconnectSession());
+        }
+
+        View cardData = findViewById(R.id.card_nav_data);
+        if (cardData != null)
+        {
+            cardData.setOnClickListener(v -> openServiceFromHome(ObdProt.OBD_SVC_DATA, R.string.obd_data));
+        }
+
+        View cardCodes = findViewById(R.id.card_nav_codes);
+        if (cardCodes != null)
+        {
+            cardCodes.setOnClickListener(v -> openServiceFromHome(ObdProt.OBD_SVC_READ_CODES, R.string.obd_codes));
+        }
+
+        View cardVeh = findViewById(R.id.card_nav_veh);
+        if (cardVeh != null)
+        {
+            cardVeh.setOnClickListener(v -> openServiceFromHome(ObdProt.OBD_SVC_VEH_INFO, R.string.obd_veh_info));
+        }
+
+        View cardLoad = findViewById(R.id.card_nav_load);
+        if (cardLoad != null)
+        {
+            cardLoad.setOnClickListener(v -> {
+                setMode(MODE.FILE);
+                selectFileToLoad();
+            });
+        }
+
+        refreshHomeUi();
+    }
+
+    private void openServiceFromHome(int svc, int titleRes)
+    {
+        if (getMode() == MODE.OFFLINE)
+        {
+            Toast.makeText(this, R.string.connect_first_hint, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        setObdService(svc, getString(titleRes));
+    }
+
+    /**
+     * Wire up interactive controls on obd_list.xml (service tabs, search bar, 1-tap gauges/chart)
+     */
+    private void initDataListControls()
+    {
+        if (mListView == null) return;
+
+        View btnHome = mListView.findViewById(R.id.btn_nav_home);
+        if (btnHome != null)
+        {
+            btnHome.setOnClickListener(v -> setObdService(ObdProt.OBD_SVC_NONE, null));
+        }
+
+        View btnDisconnect = mListView.findViewById(R.id.btn_header_disconnect);
+        if (btnDisconnect != null)
+        {
+            btnDisconnect.setOnClickListener(v -> disconnectSession());
+        }
+
+        View milBadge = mListView.findViewById(R.id.mil_badge_container);
+        if (milBadge != null)
+        {
+            milBadge.setOnClickListener(v ->
+                    setObdService(ObdProt.OBD_SVC_READ_CODES, getString(R.string.obd_codes)));
+        }
+
+        View tabData = mListView.findViewById(R.id.tab_svc_data);
+        if (tabData != null)
+        {
+            tabData.setOnClickListener(v ->
+                    setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data)));
+        }
+
+        View tabCodes = mListView.findViewById(R.id.tab_svc_codes);
+        if (tabCodes != null)
+        {
+            tabCodes.setOnClickListener(v ->
+                    setObdService(ObdProt.OBD_SVC_READ_CODES, getString(R.string.obd_codes)));
+        }
+
+        View tabInfo = mListView.findViewById(R.id.tab_svc_info);
+        if (tabInfo != null)
+        {
+            tabInfo.setOnClickListener(v ->
+                    setObdService(ObdProt.OBD_SVC_VEH_INFO, getString(R.string.obd_veh_info)));
+        }
+
+        View tabFf = mListView.findViewById(R.id.tab_svc_ff);
+        if (tabFf != null)
+        {
+            tabFf.setOnClickListener(v ->
+                    setObdService(ObdProt.OBD_SVC_FREEZEFRAME, getString(R.string.service_freezeframes)));
+        }
+
+        EditText etSearch = mListView.findViewById(R.id.et_pid_search);
+        View btnClearSearch = mListView.findViewById(R.id.btn_clear_search);
+        if (etSearch != null)
+        {
+            etSearch.addTextChangedListener(new TextWatcher()
+            {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after)
+                {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count)
+                {
+                    String q = s != null ? s.toString() : "";
+                    if (btnClearSearch != null)
+                    {
+                        btnClearSearch.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
+                    }
+                    mPidAdapter.setSearchQuery(q);
+                    refreshDataListStats();
+                }
+
+                @Override
+                public void afterTextChanged(Editable s)
+                {
+                }
+            });
+        }
+        if (btnClearSearch != null && etSearch != null)
+        {
+            btnClearSearch.setOnClickListener(v -> etSearch.setText(""));
+        }
+
+        View btnQuickGauges = mListView.findViewById(R.id.btn_quick_gauges);
+        if (btnQuickGauges != null)
+        {
+            btnQuickGauges.setOnClickListener(v -> launchQuickVisualization(DATA_VIEW_MODE.DASHBOARD));
+        }
+
+        View btnQuickChart = mListView.findViewById(R.id.btn_quick_chart);
+        if (btnQuickChart != null)
+        {
+            btnQuickChart.setOnClickListener(v -> launchQuickVisualization(DATA_VIEW_MODE.CHART));
+        }
+
+        View btnQuickHud = mListView.findViewById(R.id.btn_quick_hud);
+        if (btnQuickHud != null)
+        {
+            btnQuickHud.setOnClickListener(v -> launchQuickVisualization(DATA_VIEW_MODE.HEADUP));
+        }
+
+        View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
+        if (btnClearCodesBar != null)
+        {
+            btnClearCodesBar.setOnClickListener(v -> clearObdFaultCodes());
+        }
+    }
+
+    /**
+     * Launch Dashboard / Chart / HUD either for user-checked items or automatically for top numeric PIDs.
+     */
+    private void launchQuickVisualization(DATA_VIEW_MODE targetMode)
+    {
+        int[] positions;
+        if (getListView() != null && getListView().getCheckedItemCount() > 0)
+        {
+            positions = getSelectedPositions();
+        } else
+        {
+            int maxItems = (targetMode == DATA_VIEW_MODE.CHART) ? 4 : 6;
+            positions = findBestNumericPositions(maxItems);
+        }
+
+        if (positions.length == 0)
+        {
+            Toast.makeText(this, R.string.no_numeric_items_yet, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        switch (targetMode)
+        {
+            case DASHBOARD:
+            case HEADUP:
+                DashBoardActivity.setAdapter(getListAdapter());
+                Intent dashIntent = new Intent(this, DashBoardActivity.class);
+                dashIntent.putExtra(DashBoardActivity.POSITIONS, positions);
+                dashIntent.putExtra(DashBoardActivity.RES_ID,
+                        targetMode == DATA_VIEW_MODE.DASHBOARD ? R.layout.dashboard : R.layout.head_up);
+                startActivityForResult(dashIntent, REQUEST_GRAPH_DISPLAY_DONE);
+                this.dataViewMode = targetMode;
+                break;
+
+            case CHART:
+                ChartActivity.setAdapter(getListAdapter());
+                Intent chartIntent = new Intent(this, ChartActivity.class);
+                chartIntent.putExtra(ChartActivity.POSITIONS, positions);
+                chartIntent.putExtra(ChartActivity.LIVE_UPDATE,
+                        Set.of(MODE.ONLINE, MODE.DEMO).contains(getMode()));
+                startActivityForResult(chartIntent, REQUEST_GRAPH_DISPLAY_DONE);
+                this.dataViewMode = targetMode;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private int[] findBestNumericPositions(int maxCount)
+    {
+        if (currDataAdapter == null) return new int[0];
+        ArrayList<Integer> chosen = new ArrayList<>(maxCount);
+
+        // First pick priority driving telemetry PIDs if present
+        for (int wantedPid : PRIORITY_NUMERIC_PIDS)
+        {
+            if (chosen.size() >= maxCount) break;
+            for (int i = 0; i < currDataAdapter.getCount(); i++)
+            {
+                if (chosen.contains(i)) continue;
+                Object obj = currDataAdapter.getItem(i);
+                if (obj instanceof EcuDataPv)
+                {
+                    EcuDataPv pv = (EcuDataPv) obj;
+                    if (pv.get(EcuDataPv.FID_VALUE) instanceof Number
+                            && pv.getAsInt(EcuDataPv.FID_PID) == wantedPid)
+                    {
+                        chosen.add(i);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fill remaining slots with any other numeric PIDs
+        for (int i = 0; i < currDataAdapter.getCount() && chosen.size() < maxCount; i++)
+        {
+            if (chosen.contains(i)) continue;
+            Object obj = currDataAdapter.getItem(i);
+            if (obj instanceof EcuDataPv
+                    && ((EcuDataPv) obj).get(EcuDataPv.FID_VALUE) instanceof Number)
+            {
+                chosen.add(i);
+            }
+        }
+
+        int[] result = new int[chosen.size()];
+        for (int i = 0; i < chosen.size(); i++)
+        {
+            result[i] = chosen.get(i);
+        }
+        return result;
+    }
+
+    private void refreshAllUi()
+    {
+        refreshHomeUi();
+        refreshDataHeaderUi();
+        refreshDataListStats();
+    }
+
+    private void refreshHomeUi()
+    {
+        CommService.MEDIUM activeMedium = resolveRealMedium(prefs);
+
+        View chipBt = findViewById(R.id.chip_medium_bt);
+        View chipBle = findViewById(R.id.chip_medium_ble);
+        View chipWifi = findViewById(R.id.chip_medium_wifi);
+        View chipUsb = findViewById(R.id.chip_medium_usb);
+        if (chipBt != null) chipBt.setSelected(activeMedium == CommService.MEDIUM.BLUETOOTH);
+        if (chipBle != null) chipBle.setSelected(activeMedium == CommService.MEDIUM.BLE);
+        if (chipWifi != null) chipWifi.setSelected(activeMedium == CommService.MEDIUM.NETWORK);
+        if (chipUsb != null) chipUsb.setSelected(activeMedium == CommService.MEDIUM.USB);
+
+        TextView tvHint = findViewById(R.id.tv_medium_hint);
+        if (tvHint != null)
+        {
+            switch (activeMedium)
+            {
+                case BLE:
+                    tvHint.setText(R.string.medium_hint_ble);
+                    break;
+                case NETWORK:
+                    tvHint.setText(R.string.medium_hint_wifi);
+                    break;
+                case USB:
+                    tvHint.setText(R.string.medium_hint_usb);
+                    break;
+                case BLUETOOTH:
+                default:
+                    tvHint.setText(R.string.medium_hint_bt);
+                    break;
+            }
+        }
+
+        TextView badge = findViewById(R.id.home_status_badge);
+        if (badge != null)
+        {
+            switch (getMode())
+            {
+                case ONLINE:
+                    badge.setText(R.string.status_online);
+                    badge.setBackgroundResource(R.drawable.bg_badge_online);
+                    badge.setTextColor(ContextCompat.getColor(this, R.color.status_online));
+                    break;
+                case DEMO:
+                    badge.setText(R.string.status_demo);
+                    badge.setBackgroundResource(R.drawable.bg_badge_demo);
+                    badge.setTextColor(ContextCompat.getColor(this, R.color.status_demo));
+                    break;
+                case FILE:
+                    badge.setText(R.string.status_file);
+                    badge.setBackgroundResource(R.drawable.bg_badge_neutral);
+                    badge.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                    break;
+                case OFFLINE:
+                default:
+                    badge.setText(R.string.status_offline);
+                    badge.setBackgroundResource(R.drawable.bg_badge_neutral);
+                    badge.setTextColor(ContextCompat.getColor(this, R.color.status_offline));
+                    break;
+            }
+        }
+
+        TextView tvConnectReal = findViewById(R.id.tv_btn_connect_real);
+        if (tvConnectReal != null)
+        {
+            tvConnectReal.setText(getMode() == MODE.ONLINE
+                    ? R.string.open_live_data
+                    : R.string.connect_real_adapter);
+        }
+
+        View btnStartDemo = findViewById(R.id.btn_start_demo);
+        TextView tvStartDemo = findViewById(R.id.tv_btn_start_demo);
+        if (btnStartDemo != null && tvStartDemo != null)
+        {
+            if (getMode() == MODE.ONLINE)
+            {
+                btnStartDemo.setVisibility(View.GONE);
+            } else
+            {
+                btnStartDemo.setVisibility(View.VISIBLE);
+                tvStartDemo.setText(getMode() == MODE.DEMO
+                        ? R.string.open_live_data
+                        : R.string.start_demo_mode);
+            }
+        }
+
+        View btnDisconnectHome = findViewById(R.id.btn_disconnect_home);
+        TextView tvDisconnectHome = findViewById(R.id.tv_btn_disconnect_home);
+        if (btnDisconnectHome != null && tvDisconnectHome != null)
+        {
+            if (getMode() == MODE.OFFLINE)
+            {
+                btnDisconnectHome.setVisibility(View.GONE);
+            } else
+            {
+                btnDisconnectHome.setVisibility(View.VISIBLE);
+                tvDisconnectHome.setText(getMode() == MODE.DEMO
+                        ? R.string.stop_demo_mode
+                        : R.string.disconnect);
+            }
+        }
+    }
+
+    private void refreshDataHeaderUi()
+    {
+        if (mListView == null) return;
+
+        TextView tvSession = mListView.findViewById(R.id.tv_session_badge);
+        if (tvSession != null)
+        {
+            switch (getMode())
+            {
+                case DEMO:
+                    tvSession.setText(R.string.status_demo);
+                    tvSession.setBackgroundResource(R.drawable.bg_badge_demo);
+                    tvSession.setTextColor(ContextCompat.getColor(this, R.color.status_demo));
+                    break;
+                case FILE:
+                    tvSession.setText(R.string.status_file);
+                    tvSession.setBackgroundResource(R.drawable.bg_badge_neutral);
+                    tvSession.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                    break;
+                case ONLINE:
+                default:
+                    tvSession.setText(R.string.status_online);
+                    tvSession.setBackgroundResource(R.drawable.bg_badge_online);
+                    tvSession.setTextColor(ContextCompat.getColor(this, R.color.status_online));
+                    break;
+            }
+        }
+
+        TextView btnDisconnect = mListView.findViewById(R.id.btn_header_disconnect);
+        if (btnDisconnect != null)
+        {
+            btnDisconnect.setText(getMode() == MODE.DEMO
+                    ? R.string.stop_demo_mode
+                    : R.string.disconnect);
+        }
+
+        View milBadge = mListView.findViewById(R.id.mil_badge_container);
+        ImageView ivMil = mListView.findViewById(R.id.iv_mil_icon);
+        TextView tvMil = mListView.findViewById(R.id.tv_mil_status);
+        boolean milActive = (lastNumCodes & 0x80) != 0;
+        int dtcCount = lastNumCodes & 0x7F;
+        if (milBadge != null && ivMil != null && tvMil != null)
+        {
+            ivMil.setImageResource(milActive ? R.drawable.mil_on : R.drawable.mil_off);
+            if (milActive || dtcCount > 0)
+            {
+                milBadge.setBackgroundResource(R.drawable.bg_badge_danger);
+                tvMil.setTextColor(ContextCompat.getColor(this, R.color.status_danger));
+                tvMil.setText(getString(R.string.mil_active_fmt, dtcCount));
+            } else
+            {
+                milBadge.setBackgroundResource(R.drawable.bg_badge_neutral);
+                tvMil.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                tvMil.setText(R.string.mil_ok);
+            }
+        }
+
+        View tabData = mListView.findViewById(R.id.tab_svc_data);
+        View tabCodes = mListView.findViewById(R.id.tab_svc_codes);
+        View tabInfo = mListView.findViewById(R.id.tab_svc_info);
+        View tabFf = mListView.findViewById(R.id.tab_svc_ff);
+
+        if (tabData != null) tabData.setSelected(obdService == ObdProt.OBD_SVC_DATA);
+        if (tabCodes != null)
+        {
+            tabCodes.setSelected(obdService == ObdProt.OBD_SVC_READ_CODES
+                    || obdService == ObdProt.OBD_SVC_PENDINGCODES
+                    || obdService == ObdProt.OBD_SVC_PERMACODES);
+        }
+        if (tabInfo != null) tabInfo.setSelected(obdService == ObdProt.OBD_SVC_VEH_INFO);
+        if (tabFf != null)
+        {
+            tabFf.setSelected(obdService == ObdProt.OBD_SVC_FREEZEFRAME);
+            boolean ffAvailable = (lastNumCodes != 0)
+                    || (ObdProt.tCodes != null && !ObdProt.tCodes.isEmpty());
+            tabFf.setVisibility(ffAvailable || obdService == ObdProt.OBD_SVC_FREEZEFRAME
+                    ? View.VISIBLE : View.GONE);
+        }
+
+        View liveToolbar = mListView.findViewById(R.id.live_data_toolbar);
+        if (liveToolbar != null)
+        {
+            liveToolbar.setVisibility(obdService == ObdProt.OBD_SVC_DATA ? View.VISIBLE : View.GONE);
+        }
+
+        View codesToolbar = mListView.findViewById(R.id.codes_toolbar);
+        if (codesToolbar != null)
+        {
+            boolean isCodesSvc = (obdService == ObdProt.OBD_SVC_READ_CODES
+                    || obdService == ObdProt.OBD_SVC_PENDINGCODES
+                    || obdService == ObdProt.OBD_SVC_PERMACODES);
+            codesToolbar.setVisibility(isCodesSvc && getMode() != MODE.FILE ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void refreshDataListStats()
+    {
+        if (mListView == null || currDataAdapter == null) return;
+
+        int count = currDataAdapter.getCount();
+        TextView tvCount = mListView.findViewById(R.id.tv_params_count);
+        if (tvCount != null)
+        {
+            tvCount.setText(getString(R.string.params_count_fmt, count));
+        }
+
+        TextView tvEmpty = mListView.findViewById(R.id.tv_list_empty);
+        if (tvEmpty != null)
+        {
+            if (count > 0)
+            {
+                tvEmpty.setVisibility(View.GONE);
+            } else
+            {
+                tvEmpty.setVisibility(View.VISIBLE);
+                if (obdService == ObdProt.OBD_SVC_READ_CODES
+                        || obdService == ObdProt.OBD_SVC_PENDINGCODES
+                        || obdService == ObdProt.OBD_SVC_PERMACODES)
+                {
+                    tvEmpty.setText(R.string.empty_no_codes);
+                } else if (obdService == ObdProt.OBD_SVC_DATA
+                        && !mPidAdapter.getSearchQuery().isEmpty())
+                {
+                    tvEmpty.setText(R.string.empty_no_search_match);
+                } else
+                {
+                    tvEmpty.setText(R.string.empty_waiting_data);
+                }
+            }
+        }
+    }
+
     @Override
     public void onStart()
     {
         super.onStart();
     }
 
-    /**
-     * Handle permission request results.
-     * Retries BT/BLE mode initialisation once the required permissions are granted.
-     */
     @Override
     public void onRequestPermissionsResult(int requestCode,
-                                           @androidx.annotation.NonNull String[] permissions,
-                                           @androidx.annotation.NonNull int[] grantResults)
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults)
     {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_BT_PERMISSIONS) {
-            boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == REQUEST_BT_PERMISSIONS)
+        {
+            boolean allGranted = grantResults.length > 0;
+            for (int result : grantResults)
+            {
+                if (result != PackageManager.PERMISSION_GRANTED)
+                {
                     allGranted = false;
                     break;
                 }
             }
-            if (allGranted) {
-                initSelectedMode();
+            if (allGranted)
+            {
+                if (pendingConnectAfterPermission)
+                {
+                    pendingConnectAfterPermission = false;
+                    startRealConnection();
+                } else
+                {
+                    initSelectedMode();
+                }
+            } else
+            {
+                pendingConnectAfterPermission = false;
+                Toast.makeText(this, R.string.bt_permission_required, Toast.LENGTH_LONG).show();
             }
         }
     }
 
-    @Override protected void onPause()
+    @Override
+    protected void onPause()
     {
         super.onPause();
-
-        // stop data display update timer
-        updateTimer.cancel();
-        
-        // Clean up resources to prevent memory leaks
+        if (updateTimer != null)
+        {
+            updateTimer.cancel();
+        }
         ModernUiUtils.optimizeListView(getListView());
     }
 
-    @Override protected void onResume()
+    @Override
+    protected void onResume()
     {
-        // Apply locale on resume (in case it was changed in settings)
         SettingsActivity.applyLocale(this);
 
-        // set up data display update timer
         updateTimer = new Timer();
         final TimerTask updateTask = new TimerTask()
         {
             @Override
             public void run()
             {
-                /* forward message to update the view */
                 Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_UPDATE_VIEW);
                 mHandler.sendMessage(msg);
             }
         };
         updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
+        refreshAllUi();
 
         super.onResume();
     }
 
-    /*
-     * (non-Javadoc)
-     *
-     * @see android.app.Activity#onDestroy()
-     */
     @SuppressLint("MissingPermission")
     @Override
     protected void onDestroy()
     {
-        // Stop toolbar hider thread
         setAutoHider(false);
 
         try
         {
-            // Reduce ELM power consumption by setting it to sleep
             CommService.elm.goToSleep();
-            // wait until message is out ...
             Thread.sleep(100, 0);
         } catch (InterruptedException e)
         {
-            // do nothing
             log.log(Level.FINER, e.getLocalizedMessage());
         }
 
-        /* don't listen to ELM data changes any more */
         removeDataListeners();
-        // don't listen to ELM property changes any more
         CommService.elm.removePropertyChangeListener(this);
 
-        // stop demo service if it was started
+        stopDemoService();
         setMode(MODE.OFFLINE);
 
-        // stop communication service
         if (mCommService != null)
         {
             mCommService.stop();
         }
-        
-        // if bluetooth adapter was switched OFF before ...
-        if (mBluetoothAdapter != null && !initialBtStateEnabled)
+
+        if (mBluetoothAdapter != null && !initialBtStateEnabled
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
         {
-            // ... turn it OFF again
-            mBluetoothAdapter.disable();
+            try
+            {
+                mBluetoothAdapter.disable();
+            } catch (SecurityException ignored)
+            {
+            }
         }
 
-        log.info(String.format("%s %s finished",
+        log.info(String.format(Locale.US, "%s %s finished",
                 getString(R.string.app_name),
                 getString(R.string.app_version)));
 
-        /* remove log file handler, if available (file access was granted) */
         if (logFileHandler != null) logFileHandler.close();
         Logger.getLogger("").removeHandler(logFileHandler);
 
-        // Shut down the background executor
         executor.shutdown();
-
-        // Clean up view hierarchy
         ModernUiUtils.cleanupViewHierarchy(findViewById(android.R.id.content));
 
         super.onDestroy();
@@ -841,20 +1555,23 @@ public class MainActivity extends PluginManager
     @Override
     public void setContentView(int layoutResID)
     {
-        setContentView(getLayoutInflater().inflate(layoutResID, null));
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        setContentView(getLayoutInflater().inflate(layoutResID, contentRoot, false));
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     public void setContentView(View view)
     {
         super.setContentView(view);
-        getListView().setOnTouchListener(toolbarAutoHider);
+        if (getListView() != null)
+        {
+            getListView().setOnTouchListener(toolbarAutoHider);
+        }
     }
 
-    /**
-     * handle pressing of the BACK-KEY
-     */
     @SuppressLint("GestureBackNavigation")
+    @Override
     public void onBackPressed()
     {
         if (getListAdapter() == pluginHandler)
@@ -862,23 +1579,22 @@ public class MainActivity extends PluginManager
             setObdService(obdService, null);
         } else
         {
-            if (CommService.elm.getService() != ObdProt.OBD_SVC_NONE)
+            if (CommService.elm.getService() != ObdProt.OBD_SVC_NONE
+                    || obdService != ObdProt.OBD_SVC_NONE)
             {
-                // revert to start view
-                setObdService(ObdProt.OBD_SVC_NONE, null);
-                // If we return from NON list view (i.e. FILTERED)
                 if (dataViewMode != DATA_VIEW_MODE.LIST)
                 {
-                    // revert to list view
                     setDataViewMode(DATA_VIEW_MODE.LIST);
                     setObdService(ObdProt.OBD_SVC_DATA, null);
+                } else
+                {
+                    setObdService(ObdProt.OBD_SVC_NONE, null);
                 }
             } else
             {
                 if (lastBackPressTime < System.currentTimeMillis() - EXIT_TIMEOUT)
                 {
-                    exitToast =
-                            Toast.makeText(this, R.string.back_again_to_exit, Toast.LENGTH_SHORT);
+                    exitToast = Toast.makeText(this, R.string.back_again_to_exit, Toast.LENGTH_SHORT);
                     exitToast.show();
                     lastBackPressTime = System.currentTimeMillis();
                 } else
@@ -893,144 +1609,124 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Handler for options menu creation event
-     * 
-     * Creates the main application menu with organized access to key features:
-     * - Connection management (connect/disconnect to OBD adapter)
-     * - Data operations (save/load measurement data) 
-     * - Settings and configuration
-     * - OBD diagnostic services (submenu)
-     * 
-     * Menu structure is compatible with Android 4.1+ and uses standard
-     * Android menu components for maximum maintainability.
-     */
     @Override
     public boolean onCreateOptionsMenu(Menu menu)
     {
-        // Inflate the main menu with connection, data, and settings options
         getMenuInflater().inflate(R.menu.main, menu);
-        // Inflate the OBD services submenu for diagnostic functions
-        getMenuInflater().inflate(R.menu.obd_services, menu.findItem(R.id.obd_services).getSubMenu());
+        getMenuInflater().inflate(R.menu.obd_services,
+                Objects.requireNonNull(menu.findItem(R.id.obd_services).getSubMenu()));
         MainActivity.menu = menu;
-        // update menu item status for current conversion system
         setConversionSystem(EcuDataItem.cnvSystem);
-        
-        // Ensure menus are properly visible based on current mode
         updateMenuVisibility();
-        
         return true;
     }
 
-    /**
-     * Handler for Options menu selection
-     * 
-     * Handles menu item selections with organized functionality:
-     * - Connection Management: Connect/disconnect to OBD adapters
-     * - Data Export: Save and load measurement data  
-     * - Settings: Access application and OBD configuration
-     * - Diagnostics: OBD service functions for vehicle diagnostics
-     * 
-     * Menu structure provides direct access to key features from any screen.
-     * Compatible with Android 4.1+ using standard menu handling.
-     */
     @Override
     public boolean onOptionsItemSelected(MenuItem item)
     {
         int id = item.getItemId();
+
+        if (id == R.id.day_night_mode)
         {
-            // Display and UI Management
-            if(id == R.id.day_night_mode) {
-                // quick toggle: force the opposite of what's currently displayed
-                boolean currentlyDark = (getResources().getConfiguration().uiMode
-                        & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-                prefs.edit().putString(THEME_MODE, currentlyDark ? "light" : "dark").apply();
-                return true;
-            }
+            boolean currentlyDark = (getResources().getConfiguration().uiMode
+                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+            prefs.edit().putString(THEME_MODE, currentlyDark ? "light" : "dark").apply();
+            return true;
+        }
 
-            // Connection Management
-            if(id == R.id.secure_connect_scan) {
-                setMode(MODE.ONLINE);
-                return true;
-            }
+        // Separate Real Connection vs Demo Mode
+        if (id == R.id.secure_connect_scan)
+        {
+            startRealConnection();
+            return true;
+        }
 
-            if(id == R.id.disconnect) {
-                // stop communication service
-                if (mCommService != null) {
-                    mCommService.stop();
-                }
-                setMode(MODE.OFFLINE);
-                return true;
-            }
+        if (id == R.id.action_demo)
+        {
+            startDemoMode();
+            return true;
+        }
 
-            // Application Settings and Configuration
-            if(id == R.id.reset_preselections) {
-                clearPreselections();
-                recreate();
-                return true;
-            }
+        if (id == R.id.disconnect)
+        {
+            disconnectSession();
+            return true;
+        }
 
-            if(id == R.id.settings) {
-                // Launch settings activity for app configuration
-                Intent settingsIntent = new Intent(this, SettingsActivity.class);
-                startActivityForResult(settingsIntent, REQUEST_SETTINGS);
-                return true;
-            }
+        if (id == R.id.reset_preselections)
+        {
+            clearPreselections();
+            recreate();
+            return true;
+        }
 
-            if(id == R.id.plugin_manager) {
-                setManagerView();
-                return true;
-            }
+        if (id == R.id.settings)
+        {
+            Intent settingsIntent = new Intent(this, SettingsActivity.class);
+            startActivityForResult(settingsIntent, REQUEST_SETTINGS);
+            return true;
+        }
 
-            // Data Export and Management
-            if(id == R.id.save) {
-                // save recorded data (threaded for performance)
-                fileHelper.saveDataThreaded();
-                return true;
-            }
+        if (id == R.id.plugin_manager)
+        {
+            setManagerView();
+            return true;
+        }
 
-            if(id == R.id.load) {
-                setMode(MODE.FILE);
-                selectFileToLoad();
-                return true;
-            }
+        if (id == R.id.save)
+        {
+            fileHelper.saveDataThreaded();
+            return true;
+        }
 
-            // OBD Diagnostic Services
-            if(id == R.id.service_none) {
-                setObdService(ObdProt.OBD_SVC_NONE, item.getTitle());
-                return true;
-            }
+        if (id == R.id.load)
+        {
+            setMode(MODE.FILE);
+            selectFileToLoad();
+            return true;
+        }
 
-            if(id == R.id.service_data) {
-                setObdService(ObdProt.OBD_SVC_DATA, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_none)
+        {
+            setObdService(ObdProt.OBD_SVC_NONE, item.getTitle());
+            return true;
+        }
 
-            if(id == R.id.service_vid_data) {
-                setObdService(ObdProt.OBD_SVC_VEH_INFO, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_data)
+        {
+            setObdService(ObdProt.OBD_SVC_DATA, item.getTitle());
+            return true;
+        }
 
-            if(id == R.id.service_freezeframes) {
-                setObdService(ObdProt.OBD_SVC_FREEZEFRAME, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_vid_data)
+        {
+            setObdService(ObdProt.OBD_SVC_VEH_INFO, item.getTitle());
+            return true;
+        }
 
-            if(id == R.id.service_testcontrol) {
-                setObdService(ObdProt.OBD_SVC_CTRL_MODE, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_freezeframes)
+        {
+            setObdService(ObdProt.OBD_SVC_FREEZEFRAME, item.getTitle());
+            return true;
+        }
 
-            if(id == R.id.service_codes) {
-                setObdService(ObdProt.OBD_SVC_READ_CODES, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_testcontrol)
+        {
+            setObdService(ObdProt.OBD_SVC_CTRL_MODE, item.getTitle());
+            return true;
+        }
 
-            if(id == R.id.service_clearcodes) {
-                clearObdFaultCodes();
-                setObdService(ObdProt.OBD_SVC_READ_CODES, item.getTitle());
-                return true;
-            }
+        if (id == R.id.service_codes)
+        {
+            setObdService(ObdProt.OBD_SVC_READ_CODES, item.getTitle());
+            return true;
+        }
+
+        if (id == R.id.service_clearcodes)
+        {
+            clearObdFaultCodes();
+            setObdService(ObdProt.OBD_SVC_READ_CODES, item.getTitle());
+            return true;
         }
 
         return super.onOptionsItemSelected(item);
@@ -1039,7 +1735,6 @@ public class MainActivity extends PluginManager
     @Override
     public void onItemCheckedStateChanged(ActionMode mode, int position, long id, boolean checked)
     {
-        // Intentionally do nothing
     }
 
     @Override
@@ -1061,38 +1756,34 @@ public class MainActivity extends PluginManager
     {
         int id = item.getItemId();
 
-        if(id == R.id.chart_selected) {
+        if (id == R.id.chart_selected)
+        {
             setDataViewMode(DATA_VIEW_MODE.CHART);
             return true;
         }
-
-        if(id == R.id.hud_selected) {
+        if (id == R.id.hud_selected)
+        {
             setDataViewMode(DATA_VIEW_MODE.HEADUP);
             return true;
         }
-
-        if(id == R.id.dashboard_selected) {
+        if (id == R.id.dashboard_selected)
+        {
             setDataViewMode(DATA_VIEW_MODE.DASHBOARD);
             return true;
         }
-
-        if(id == R.id.filter_selected) {
+        if (id == R.id.filter_selected)
+        {
             setDataViewMode(DATA_VIEW_MODE.FILTERED);
             return true;
         }
-
         return false;
     }
 
     @Override
     public void onDestroyActionMode(ActionMode mode)
     {
-
     }
 
-    /**
-     * Handler for result messages from other activities
-     */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data)
     {
@@ -1102,29 +1793,26 @@ public class MainActivity extends PluginManager
 
         switch (requestCode)
         {
-            // device is connected
             case REQUEST_CONNECT_DEVICE_SECURE:
                 secureConnection = true;
-                // no break here ...
+                // fall through
             case REQUEST_CONNECT_DEVICE_INSECURE:
-                // When BtDeviceListActivity returns with a device to connect
-                if (resultCode == Activity.RESULT_OK)
+                if (resultCode == Activity.RESULT_OK && data != null && data.getExtras() != null)
                 {
-                    // Get the device MAC address
-                    String address = Objects.requireNonNull(data.getExtras()).getString(
-                            BtDeviceListActivity.EXTRA_DEVICE_ADDRESS);
-                    // save reported address as last setting
-                    prefs.edit().putString(PRESELECT.LAST_DEV_ADDRESS.toString(), address).apply();
-                    switch(CommService.medium)
+                    String address = data.getExtras().getString(BtDeviceListActivity.EXTRA_DEVICE_ADDRESS);
+                    if (address != null)
                     {
-                        case BLE:
+                        prefs.edit().putString(PRESELECT.LAST_DEV_ADDRESS.toString(), address).apply();
+                        if (CommService.medium == CommService.MEDIUM.BLE)
+                        {
                             connectBleDevice(address, secureConnection);
-                            break;
-
-                        case BLUETOOTH:
-                        default:
+                        } else
+                        {
                             connectBtDevice(address, secureConnection);
-                            break;
+                        }
+                    } else
+                    {
+                        setMode(MODE.OFFLINE);
                     }
                 } else
                 {
@@ -1132,10 +1820,8 @@ public class MainActivity extends PluginManager
                 }
                 break;
 
-            // USB device selected
             case REQUEST_CONNECT_DEVICE_USB:
-                // DeviceListActivity returns with a device to connect
-                if (resultCode == Activity.RESULT_OK)
+                if (resultCode == Activity.RESULT_OK && UsbDeviceListActivity.selectedPort != null)
                 {
                     mCommService = new UsbCommService(this, mHandler);
                     mCommService.connect(UsbDeviceListActivity.selectedPort, true);
@@ -1145,50 +1831,42 @@ public class MainActivity extends PluginManager
                 }
                 break;
 
-            // bluetooth enabled
             case REQUEST_ENABLE_BT:
-                // When the request to enable Bluetooth returns
+                boolean shouldConnect = pendingConnectAfterBtEnable;
+                pendingConnectAfterBtEnable = false;
                 if (resultCode == Activity.RESULT_OK)
                 {
-                    // Start online mode
-                    setMode(MODE.ONLINE);
+                    if (shouldConnect)
+                    {
+                        startRealConnection();
+                    }
                 } else
                 {
-                    // Set offline mode
                     setMode(MODE.OFFLINE);
                 }
                 break;
 
-            // file selected
             case REQUEST_SELECT_FILE:
-                if (resultCode == RESULT_OK)
+                if (resultCode == RESULT_OK && data != null && data.getData() != null)
                 {
-                    // Get the Uri of the selected file
-                    Uri uri = data.getData();
-                    loadDataFromUri(uri);
+                    loadDataFromUri(data.getData());
                 }
                 break;
 
-            // settings finished
             case REQUEST_SETTINGS:
-            {
-                // change handling done by callbacks
-            }
-            break;
+                refreshAllUi();
+                break;
 
-            // graphical data view finished
             case REQUEST_GRAPH_DISPLAY_DONE:
-                // let context know that we are in list mode again ...
                 dataViewMode = DATA_VIEW_MODE.LIST;
                 break;
         }
     }
 
-    void loadDataFromUri(Uri uri) {
+    void loadDataFromUri(Uri uri)
+    {
         log.info("Load content: " + uri);
-        // load data ...
         fileHelper.loadDataThreaded(uri, mHandler);
-        // don't allow saving it again
         setMenuItemEnable(R.id.save, false);
         setMenuItemEnable(R.id.obd_services, true);
     }
@@ -1196,37 +1874,35 @@ public class MainActivity extends PluginManager
     @Override
     public void onSharedPreferenceChanged(SharedPreferences prefs, String key)
     {
-        // keep main display on?
         if (key == null || KEEP_SCREEN_ON.equals(key))
         {
-            getWindow().addFlags(prefs.getBoolean(KEEP_SCREEN_ON, false)
-                    ? WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                    : 0);
+            if (prefs.getBoolean(KEEP_SCREEN_ON, false))
+            {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else
+            {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
         }
 
-        // FULL SCREEN operation based on preference settings
         if (key == null || PREF_FULLSCREEN.equals(key))
         {
-            getWindow().setFlags(prefs.getBoolean(PREF_FULLSCREEN, true)
+            getWindow().setFlags(prefs.getBoolean(PREF_FULLSCREEN, false)
                             ? WindowManager.LayoutParams.FLAG_FULLSCREEN : 0,
                     WindowManager.LayoutParams.FLAG_FULLSCREEN);
         }
 
-        // theme (day/night) mode
         if (key == null || THEME_MODE.equals(key))
         {
             applyThemeMode(true);
         }
 
-        // set default comm medium
         if (key == null || SettingsActivity.KEY_COMM_MEDIUM.equals(key))
         {
-            CommService.medium =
-                    CommService.MEDIUM.values()[
-                            getPrefsInt(SettingsActivity.KEY_COMM_MEDIUM, 0)];
+            CommService.medium = resolveRealMedium(prefs);
+            refreshHomeUi();
         }
 
-        // enable/disable ELM adaptive timing
         if (key == null || ELM_ADAPTIVE_TIMING.equals(key))
         {
             CommService.elm.mAdaptiveTiming.setMode(
@@ -1235,23 +1911,20 @@ public class MainActivity extends PluginManager
                                     ElmProt.AdaptTimingMode.OFF.toString())));
         }
 
-        // set protocol flag to initiate immediate reset on NRC reception
         if (key == null || ELM_RESET_ON_NRC.equals(key))
         {
             CommService.elm.setResetOnNrc(prefs.getBoolean(ELM_RESET_ON_NRC, false));
         }
 
-        // set custom ELM init commands
         if (key == null || ELM_CUSTOM_INIT_CMDS.equals(key))
         {
             String value = prefs.getString(ELM_CUSTOM_INIT_CMDS, null);
-            if (value != null && value.length() > 0)
+            if (value != null && !value.isEmpty())
             {
                 CommService.elm.setCustomInitCommands(value.split("\n"));
             }
         }
 
-        // ELM timeout
         if (key == null || SettingsActivity.ELM_MIN_TIMEOUT.equals(key))
         {
             CommService.elm.mAdaptiveTiming.setElmTimeoutMin(
@@ -1259,62 +1932,50 @@ public class MainActivity extends PluginManager
                             CommService.elm.mAdaptiveTiming.getElmTimeoutMin()));
         }
 
-        // ... measurement system
         if (key == null || MEASURE_SYSTEM.equals(key))
         {
             setConversionSystem(getPrefsInt(MEASURE_SYSTEM, EcuDataItem.SYSTEM_METRIC));
         }
 
-        // ... preferred protocol
         if (key == null || SettingsActivity.KEY_PROT_SELECT.equals(key))
         {
             ElmProt.setPreferredProtocol(getPrefsInt(SettingsActivity.KEY_PROT_SELECT, 0));
         }
 
-        // log levels
         if (key == null || LOG_MASTER.equals(key))
         {
             setLogLevels();
         }
 
-        // update from protocol extensions
-        if (key == null || key.startsWith("ext_file-"))
+        if (key == null || key.startsWith("ext_file"))
         {
             loadPreferredExtensions();
         }
 
-        // set disabled ELM commands
         if (key == null || SettingsActivity.ELM_CMD_DISABLE.equals(key))
         {
             ElmProt.disableCommands(prefs.getStringSet(SettingsActivity.ELM_CMD_DISABLE, null));
         }
 
-        // AutoHide ToolBar
         if (key == null || PREF_AUTOHIDE.equals(key) || PREF_AUTOHIDE_DELAY.equals(key))
         {
             setAutoHider(prefs.getBoolean(PREF_AUTOHIDE, false));
         }
 
-        // Max. data disabling debounce counter
         if (key == null || PREF_DATA_DISABLE_MAX.equals(key))
         {
             EcuDataItem.MAX_ERROR_COUNT = getPrefsInt(PREF_DATA_DISABLE_MAX, 3);
         }
 
-        // Customized PID display color preference
         if (key != null)
         {
-            // specific key -> update single
             updatePidColor(key);
             updatePidDisplayRange(key);
             updatePidUpdatePeriod(key);
-        }
-        else
+        } else
         {
-            // loop through all keys
             for (String currKey : prefs.getAll().keySet())
             {
-                // update by key
                 updatePidColor(currKey);
                 updatePidDisplayRange(currKey);
                 updatePidUpdatePeriod(currKey);
@@ -1322,89 +1983,67 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Update PID PV display color from preference
-     * @param key Preference key
-     */
     private void updatePidColor(String key)
     {
         int pos = key.indexOf("/".concat(EcuDataPv.FID_COLOR));
-        if(pos >= 0)
+        if (pos >= 0)
         {
             String mnemonic = key.substring(0, pos);
             EcuDataItem itm = EcuDataItems.byMnemonic.get(mnemonic);
-            // Default BLACK is to detect key removal
             Integer color = prefs.getInt(key, Color.BLACK);
-            if(Color.BLACK != color)
+            if (itm != null && Color.BLACK != color)
             {
                 itm.pv.put(EcuDataPv.FID_COLOR, color);
-                log.info(String.format("PID pref %s=#%08x", key, color));
+                log.info(String.format(Locale.US, "PID pref %s=#%08x", key, color));
             }
         }
     }
 
-    /**
-     * Update PID PV display color from preference
-     * @param key Preference key
-     */
     private void updatePidDisplayRange(String key)
     {
-        final String[] rangeFields = new String[]
-        {
+        final String[] rangeFields = new String[]{
             EcuDataPv.FID_MIN,
             EcuDataPv.FID_MAX
         };
-        // Loop through <MIN/MAX>> fields
         for (String field : rangeFields)
         {
-            // If preference key matches PID/<MIN/MAX>
             int pos = key.indexOf("/".concat(field));
             if (pos >= 0)
             {
-                // Default MAX_VALUE is to detect key removal
                 Number value = prefs.getFloat(key, Float.MAX_VALUE);
                 if (Float.MAX_VALUE != value.floatValue())
                 {
-                    // Find corresponding data item
                     String mnemonic = key.substring(0, pos);
                     EcuDataItem itm = EcuDataItems.byMnemonic.get(mnemonic);
-                    // update display range limit in data item
-                    itm.pv.put(field, value);
-
-                    log.info(String.format("PID pref %s=%f", key, value));
+                    if (itm != null)
+                    {
+                        itm.pv.put(field, value);
+                        log.info(String.format(Locale.US, "PID pref %s=%f", key, value.doubleValue()));
+                    }
                 }
             }
         }
     }
 
-    /**
-     * Update customized PID display update period from preference
-     * @param key Preference key
-     */
     private void updatePidUpdatePeriod(String key)
     {
-            // If preference key matches PID/<MIN/MAX>
-            int pos = key.indexOf("/".concat(EcuDataPv.FID_UPDT_PERIOD));
-            if (pos >= 0)
+        int pos = key.indexOf("/".concat(EcuDataPv.FID_UPDT_PERIOD));
+        if (pos >= 0)
+        {
+            long value = prefs.getLong(key, 0);
+            if (0 != value)
             {
-                // Default MAX_VALUE is to detect key removal
-                long value = prefs.getLong(key, 0);
-                if (0 != value)
+                String mnemonic = key.substring(0, pos);
+                EcuDataItem itm = EcuDataItems.byMnemonic.get(mnemonic);
+                if (itm != null)
                 {
-                    // Find corresponding data item
-                    String mnemonic = key.substring(0, pos);
-                    EcuDataItem itm = EcuDataItems.byMnemonic.get(mnemonic);
-                    // update display range limit in data item
                     itm.updatePeriod_ms = value;
-
-                    log.info(String.format("PID pref %s=%d", key, value));
+                    log.info(String.format(Locale.US, "PID pref %s=%d", key, value));
                 }
             }
+        }
     }
 
-    /**
-     * Handle long licks on OBD data list items
-     */
     @Override
     public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id)
     {
@@ -1413,13 +2052,9 @@ public class MainActivity extends PluginManager
 
         switch (CommService.elm.getService())
         {
-            /* if we are in OBD data mode:
-             * ->Long click on an item starts the single item dashboard activity
-             */
             case ObdProt.OBD_SVC_DATA:
                 pv = (EcuDataPv) getListAdapter().getItem(position);
-                /* only numeric values may be shown as graph/dashboard */
-                if (pv.get(EcuDataPv.FID_VALUE) instanceof Number)
+                if (pv != null && pv.get(EcuDataPv.FID_VALUE) instanceof Number)
                 {
                     DashBoardActivity.setAdapter(getListAdapter());
                     intent = new Intent(this, DashBoardActivity.class);
@@ -1428,9 +2063,6 @@ public class MainActivity extends PluginManager
                 }
                 break;
 
-            /* If we are in DFC mode of any kind
-             * -> Long click leads to a web search for selected DFC
-             */
             case ObdProt.OBD_SVC_READ_CODES:
             case ObdProt.OBD_SVC_PERMACODES:
             case ObdProt.OBD_SVC_PENDINGCODES:
@@ -1439,7 +2071,7 @@ public class MainActivity extends PluginManager
                     intent = new Intent(Intent.ACTION_WEB_SEARCH);
                     EcuCodeItem dfc = (EcuCodeItem) getListAdapter().getItem(position);
                     intent.putExtra(SearchManager.QUERY,
-                            "OBD " + String.valueOf(dfc.get(EcuCodeItem.FID_CODE)));
+                            "OBD " + dfc.get(EcuCodeItem.FID_CODE));
                     startActivity(intent);
                 } catch (Exception e)
                 {
@@ -1449,19 +2081,16 @@ public class MainActivity extends PluginManager
                 break;
 
             case ObdProt.OBD_SVC_VEH_INFO:
-                // copy VID content to clipboard ...
                 pv = (EcuDataPv) getListAdapter().getItem(position);
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                 ClipData clip = ClipData.newPlainText(String.valueOf(pv.get(EcuDataPv.FID_DESCRIPT)),
                         String.valueOf(pv.get(EcuDataPv.FID_VALUE)));
                 clipboard.setPrimaryClip(clip);
-                // Show Toast message
                 Toast.makeText(this, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show();
                 break;
 
             case ObdProt.OBD_SVC_CTRL_MODE:
                 pv = (EcuDataPv) getListAdapter().getItem(position);
-                // Confirm & perform OBD test control ...
                 confirmObdTestControl(pv.get(EcuDataPv.FID_DESCRIPT).toString(),
                         ObdProt.OBD_SVC_CTRL_MODE,
                         pv.getAsInt(EcuDataPv.FID_PID));
@@ -1470,17 +2099,9 @@ public class MainActivity extends PluginManager
         return true;
     }
 
-    /**
-     * Handler for PV change events This handler just forwards the PV change
-     * events to the android handler, since all adapter / GUI actions have to be
-     * performed from the main handler
-     *
-     * @param event PvChangeEvent which is reported
-     */
     @Override
     public synchronized void pvChanged(PvChangeEvent event)
     {
-        // forward PV change to the UI Activity
         Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_DATA_ITEMS_CHANGED);
         if (!event.isChildEvent())
         {
@@ -1489,57 +2110,33 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Check if restore of specified preselection is wanted from settings
-     *
-     * @param preselect specified preselect
-     * @return flag if preselection shall be restored
-     */
     private boolean istRestoreWanted(PRESELECT preselect)
     {
         return prefs.getStringSet(PREF_USE_LAST, emptyStringSet).contains(preselect.toString());
     }
 
-    /**
-     * Check if last data selection shall be restored
-     * <p>
-     * If previously selected items shall be re-selected, then re-select them
-     */
     private void checkToRestoreLastDataSelection()
     {
-        // if last data items shall be restored
         if (istRestoreWanted(PRESELECT.LAST_ITEMS))
         {
-            // get preference for last seleted items
             int[] lastSelectedItems =
                     toIntArray(prefs.getString(PRESELECT.LAST_ITEMS.toString(), ""));
-            // select last selected items
             if (lastSelectedItems.length > 0)
             {
                 if (!selectDataItems(lastSelectedItems))
                 {
-                    // if items could not be applied
-                    // remove invalid preselection
                     prefs.edit().remove(PRESELECT.LAST_ITEMS.toString()).apply();
-                    log.warning(String.format("Invalid preselection: %s",
+                    log.warning(String.format(Locale.US, "Invalid preselection: %s",
                             Arrays.toString(lastSelectedItems)));
                 }
             }
         }
     }
 
-    /**
-     * Check if last view mode shall be restored
-     * <p>
-     * If last view mode shall be restored by user settings,
-     * then restore the last selected view mode
-     */
     private void checkToRestoreLastViewMode()
     {
-        // if last view mode shall be restored
         if (istRestoreWanted(PRESELECT.LAST_VIEW_MODE))
         {
-            // set last data view mode
             DATA_VIEW_MODE lastMode =
                     DATA_VIEW_MODE.valueOf(prefs.getString(PRESELECT.LAST_VIEW_MODE.toString(),
                             DATA_VIEW_MODE.LIST.toString()));
@@ -1547,12 +2144,6 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * convert result of Arrays.toString(int[]) back into int[]
-     *
-     * @param input String of array
-     * @return int[] of String value
-     */
     private int[] toIntArray(String input)
     {
         int[] result = {};
@@ -1564,7 +2155,7 @@ public class MainActivity extends PluginManager
             int[] ints = new int[split.length];
             for (String s : split)
             {
-                if (s.length() > 0)
+                if (!s.isEmpty())
                 {
                     ints[numValidEntries++] = Integer.parseInt(s);
                 }
@@ -1578,10 +2169,6 @@ public class MainActivity extends PluginManager
         return result;
     }
 
-    /**
-     * Return a human-readable protocol description for well-known ECU addresses,
-     * or an empty string if the address is not recognised.
-     */
     private static String describeEcuAddress(int addr)
     {
         switch (addr)
@@ -1597,38 +2184,26 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Prompt for selection of a single ECU from list of available ECUs
-     *
-     * @param ecuAdresses List of available ECUs
-     */
     private void selectEcu(final Set<Integer> ecuAdresses)
     {
-        // if more than one ECUs available ...
         if (ecuAdresses.size() > 1)
         {
             int preferredAddress = prefs.getInt(PRESELECT.LAST_ECU_ADDRESS.toString(), 0);
-            // check if last preferred address matches any of the reported addresses
             if (istRestoreWanted(PRESELECT.LAST_ECU_ADDRESS)
                     && ecuAdresses.contains(preferredAddress))
             {
-                // set address
                 CommService.elm.setEcuAddress(preferredAddress);
             } else
             {
-                // NO match with preference -> allow selection
-
-                // .. allow selection of single ECU address ...
                 final Integer[] addrArray = ecuAdresses.toArray(new Integer[0]);
                 final CharSequence[] entries = new CharSequence[addrArray.length];
                 for (int i = 0; i < addrArray.length; i++)
                 {
                     String desc = describeEcuAddress(addrArray[i]);
                     entries[i] = desc.isEmpty()
-                            ? String.format("0x%X", addrArray[i])
-                            : String.format("0x%X — %s", addrArray[i], desc);
+                            ? String.format(Locale.US, "0x%X", addrArray[i])
+                            : String.format(Locale.US, "0x%X — %s", addrArray[i], desc);
                 }
-                // show dialog ...
                 dlgBuilder
                         .setTitle(R.string.select_ecu_addr)
                         .setItems(entries, new DialogInterface.OnClickListener()
@@ -1637,9 +2212,7 @@ public class MainActivity extends PluginManager
                             public void onClick(DialogInterface dialog, int which)
                             {
                                 int address = addrArray[which];
-                                // set address
                                 CommService.elm.setEcuAddress(address);
-                                // set this as preference (preference change will trigger ELM command)
                                 prefs.edit().putInt(PRESELECT.LAST_ECU_ADDRESS.toString(), address)
                                         .apply();
                             }
@@ -1649,20 +2222,12 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * OnClick handler - Browse URL from content description
-     *
-     * @param view view source of click event
-     */
     public void browseClickedUrl(View view)
     {
         String url = view.getContentDescription().toString();
         startActivity(new Intent(Intent.ACTION_VIEW).setData(Uri.parse(url)));
     }
 
-    /**
-     * Unhide action bar
-     */
     private void unHideActionBar()
     {
         if (toolbarAutoHider != null)
@@ -1671,10 +2236,6 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Read the tri-state theme preference, migrating the old boolean night_mode
-     * preference on first read for users upgrading from an earlier version.
-     */
     static String getThemeModePref(SharedPreferences prefs)
     {
         if (prefs.contains(THEME_MODE))
@@ -1703,14 +2264,6 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Apply the tri-state theme preference application-wide via AppCompatDelegate.
-     * PluginManager (MainActivity's superclass) migrated to AppCompatActivity in
-     * AndrOBD-libplugin#36, so AppCompatDelegate's override reaches MainActivity
-     * correctly like any other activity here; this explicit recreate() is just a
-     * belt-and-braces trigger for a live preference change, not a workaround for
-     * a missing AppCompatActivity base.
-     */
     private void applyThemeMode(boolean recreateIfChanged)
     {
         int wanted = themeModeToNightMode(getThemeModePref(prefs));
@@ -1724,31 +2277,11 @@ public class MainActivity extends PluginManager
 
     private void setNumCodes(int newNumCodes)
     {
-        // set list background based on MIL status
-        View list = findViewById(R.id.obd_list);
-        if (list != null)
-        {
-            list.setBackgroundResource((newNumCodes & 0x80) != 0
-                    ? R.drawable.mil_on
-                    : R.drawable.mil_off);
-        }
-        // enable / disable freeze frames based on number of codes
+        lastNumCodes = newNumCodes;
         setMenuItemEnable(R.id.service_freezeframes, (newNumCodes != 0));
+        refreshDataHeaderUi();
     }
 
-    /**
-     * Set enabled state for a specified menu item
-     * This includes visual feedback by shading disabled items to clearly
-     * indicate their state to users.
-     * 
-     * Used to dynamically enable/disable menu options based on:
-     * - Connection status (enable diagnostic functions when connected)
-     * - Data availability (enable freeze frames when fault codes exist)
-     * - Application state (enable disconnect when connected)
-     *
-     * @param id      ID of menu item to modify
-     * @param enabled flag if item should be enabled/disabled
-     */
     private void setMenuItemEnable(int id, boolean enabled)
     {
         if (menu != null)
@@ -1757,30 +2290,15 @@ public class MainActivity extends PluginManager
             if (item != null)
             {
                 item.setEnabled(enabled);
-
-                // if menu item has icon, adjust its visual appearance
                 Drawable icon = item.getIcon();
                 if (icon != null)
                 {
-                    // set icon transparency to provide visual feedback
                     icon.setAlpha(enabled ? 255 : 127);
                 }
             }
         }
     }
 
-    /**
-     * Set visibility state for a specified menu item
-     * Used to show/hide menu items based on application context.
-     * 
-     * Examples:
-     * - Show "Connect" when disconnected, hide when connected
-     * - Show "Disconnect" when connected, hide when disconnected  
-     * - Show diagnostic options only when adapter is connected
-     *
-     * @param id      ID of menu item to modify
-     * @param visible flag if item should be visible/hidden
-     */
     private void setMenuItemVisible(int id, boolean visible)
     {
         if (menu != null)
@@ -1794,225 +2312,121 @@ public class MainActivity extends PluginManager
     }
 
     /**
-     * Update menu visibility based on current mode
+     * Update menu visibility with clear separation between Real Connect and Demo Mode.
      */
     private void updateMenuVisibility()
     {
         if (menu == null) return;
-        
+
         switch (mode)
         {
             case OFFLINE:
-                // In offline mode, show connect button, hide disconnect
                 setMenuItemVisible(R.id.secure_connect_scan, true);
+                setMenuItemVisible(R.id.action_demo, true);
                 setMenuItemVisible(R.id.disconnect, false);
                 setMenuItemEnable(R.id.obd_services, false);
-                // Ensure other important menu items are visible
                 setMenuItemVisible(R.id.settings, true);
                 setMenuItemVisible(R.id.day_night_mode, true);
                 break;
 
             case DEMO:
-            case ONLINE:
-                // In online mode, hide connect button, show disconnect
-                setMenuItemVisible(R.id.secure_connect_scan, false);
+                // Allow switching straight from Demo into Real Connect, or stopping Demo
+                setMenuItemVisible(R.id.secure_connect_scan, true);
+                setMenuItemVisible(R.id.action_demo, false);
                 setMenuItemVisible(R.id.disconnect, true);
                 setMenuItemEnable(R.id.obd_services, true);
                 break;
-                
-            default:
-                // Default visibility for other modes
+
+            case ONLINE:
+                setMenuItemVisible(R.id.secure_connect_scan, false);
+                setMenuItemVisible(R.id.action_demo, false);
+                setMenuItemVisible(R.id.disconnect, true);
+                setMenuItemEnable(R.id.obd_services, true);
+                break;
+
+            case FILE:
+                setMenuItemVisible(R.id.secure_connect_scan, true);
+                setMenuItemVisible(R.id.action_demo, true);
+                setMenuItemVisible(R.id.disconnect, true);
+                setMenuItemEnable(R.id.obd_services, true);
                 break;
         }
     }
 
-    /**
-     * start/stop the autmatic toolbar hider
-     */
     private void setAutoHider(boolean active)
     {
-        // disable existing hider
         if (toolbarAutoHider != null)
         {
-            // cancel auto hider
             toolbarAutoHider.cancel();
-            // forget about it
             toolbarAutoHider = null;
         }
 
-        // if new hider shall be activated
         if (active)
         {
             int timeout = getPrefsInt(MainActivity.PREF_AUTOHIDE_DELAY, 15);
-            toolbarAutoHider = new AutoHider(this,
-                    mHandler,
-                    timeout * 1000);
-            // start with update resolution of 1 second
+            toolbarAutoHider = new AutoHider(this, mHandler, timeout * 1000L);
             toolbarAutoHider.start(1000);
         }
     }
 
-    /**
-     * Get preference int value
-     *
-     * @param key          preference key name
-     * @param defaultValue numeric default value
-     * @return preference int value
-     */
-    @SuppressLint("DefaultLocale")
     private int getPrefsInt(String key, int defaultValue)
     {
         int result = defaultValue;
-
         try
         {
-            result = Integer.valueOf(prefs.getString(key, String.valueOf(defaultValue)));
+            result = Integer.parseInt(prefs.getString(key, String.valueOf(defaultValue)));
         } catch (Exception ex)
         {
-            // log error message
-            log.severe(String.format("Preference '%s'(%d): %s", key, result, ex.toString()));
+            log.severe(String.format(Locale.US, "Preference '%s'(%d): %s", key, result, ex));
         }
-
         return result;
     }
 
-    /**
-     * set listeners for data structure changes
-     */
     private void setDataListeners()
     {
-        // add pv change listeners to trigger model updates
         ObdProt.PidPvs.addPvChangeListener(this,
-                PvChangeEvent.PV_ADDED
-                        | PvChangeEvent.PV_CLEARED
-        );
+                PvChangeEvent.PV_ADDED | PvChangeEvent.PV_CLEARED);
         ObdProt.VidPvs.addPvChangeListener(this,
-                PvChangeEvent.PV_ADDED
-                        | PvChangeEvent.PV_CLEARED
-        );
+                PvChangeEvent.PV_ADDED | PvChangeEvent.PV_CLEARED);
         ObdProt.tCodes.addPvChangeListener(this,
-                PvChangeEvent.PV_ADDED
-                        | PvChangeEvent.PV_CLEARED
-        );
+                PvChangeEvent.PV_ADDED | PvChangeEvent.PV_CLEARED);
         mPluginPvs.addPvChangeListener(this,
-                PvChangeEvent.PV_ADDED
-                        | PvChangeEvent.PV_CLEARED
-        );
+                PvChangeEvent.PV_ADDED | PvChangeEvent.PV_CLEARED);
     }
 
-    /**
-     * set listeners for data structure changes
-     */
     private void removeDataListeners()
     {
-        // remove pv change listeners
         ObdProt.PidPvs.removePvChangeListener(this);
         ObdProt.VidPvs.removePvChangeListener(this);
         ObdProt.tCodes.removePvChangeListener(this);
         mPluginPvs.removePvChangeListener(this);
     }
 
-    /**
-     * get current operating mode
-     */
     private MODE getMode()
     {
         return mode;
     }
 
-    /**
-     * set new operating mode
-     *
-     * @param mode new mode
-     */
-    private void setMode(MODE mode)
+    private void setMode(MODE newMode)
     {
-        // if this is a mode change, or file reload ...
-        if (mode != this.mode || mode == MODE.FILE)
+        if (newMode != this.mode || newMode == MODE.FILE)
         {
-            if (mode != MODE.DEMO)
+            if (newMode != MODE.DEMO)
             {
                 stopDemoService();
             }
 
-            // Disable data updates in FILE mode
-            ObdItemAdapter.allowDataUpdates = (mode != MODE.FILE);
+            ObdItemAdapter.allowDataUpdates = (newMode != MODE.FILE);
 
-            switch (mode)
+            switch (newMode)
             {
                 case OFFLINE:
-                    // Mode handled by updateMenuVisibility()
+                    lastNumCodes = 0;
+                    setStatus(R.string.status_offline);
                     break;
 
                 case ONLINE:
-                    switch (CommService.medium)
-                    {
-                        case DEMO:
-                            startDemoService();
-                            break;
-
-                        case BLUETOOTH:
-                            if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled())
-                            {
-                                Toast.makeText(this, getString(R.string.none_found), Toast.LENGTH_SHORT).show();
-                                mode = MODE.OFFLINE;
-                            } else
-                            {
-                                // if pre-settings shall be used ...
-                                String address = prefs.getString(PRESELECT.LAST_DEV_ADDRESS.toString(), null);
-                                if (istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS)
-                                        && address != null)
-                                {
-                                    // ... connect with previously connected device
-                                    connectBtDevice(address, prefs.getBoolean("bt_secure_connection", false));
-                                } else
-                                {
-                                    // ... otherwise launch the BtDeviceListActivity to see devices and do scan
-                                    Intent serverIntent = new Intent(this, BtDeviceListActivity.class);
-                                    startActivityForResult(serverIntent,
-                                            prefs.getBoolean("bt_secure_connection", false)
-                                                    ? REQUEST_CONNECT_DEVICE_SECURE
-                                                    : REQUEST_CONNECT_DEVICE_INSECURE);
-                                }
-                            }
-                            break;
-
-                        case BLE:
-                            if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled())
-                            {
-                                Toast.makeText(this, getString(R.string.none_found), Toast.LENGTH_SHORT).show();
-                                mode = MODE.OFFLINE;
-                            } else
-                            {
-                                // if pre-settings shall be used ...
-                                String address = prefs.getString(PRESELECT.LAST_DEV_ADDRESS.toString(), null);
-                                if (istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS)
-                                        && address != null)
-                                {
-                                    // ... connect with previously connected device
-                                    connectBleDevice(address, prefs.getBoolean("bt_secure_connection", false));
-                                } else
-                                {
-                                    // ... otherwise launch the BtDeviceListActivity to see devices and do scan
-                                    Intent serverIntent = new Intent(this, BleDeviceListActivity.class);
-                                    startActivityForResult(serverIntent,
-                                            prefs.getBoolean("bt_secure_connection", false)
-                                                    ? REQUEST_CONNECT_DEVICE_SECURE
-                                                    : REQUEST_CONNECT_DEVICE_INSECURE);
-                                }
-                            }
-                            break;
-
-                        case USB:
-                            Intent enableIntent = new Intent(this, UsbDeviceListActivity.class);
-                            startActivityForResult(enableIntent, REQUEST_CONNECT_DEVICE_USB);
-                            break;
-
-                        case NETWORK:
-                            connectNetworkDevice(prefs.getString(DEVICE_ADDRESS, null),
-                                    getPrefsInt(DEVICE_PORT, 23));
-                            break;
-                    }
+                    setStatus(R.string.status_online);
                     break;
 
                 case DEMO:
@@ -2022,64 +2436,45 @@ public class MainActivity extends PluginManager
                 case FILE:
                     setStatus(R.string.saved_data);
                     break;
-
             }
-            // remember previous mode
-            // set new mode
-            this.mode = mode;
-            setStatus(mode.toString());
 
-            // Update menu visibility after mode change
+            this.mode = newMode;
             updateMenuVisibility();
+            refreshAllUi();
         }
     }
 
-    /**
-     * set mesaurement conversion system to metric/imperial
-     *
-     * @param cnvId ID for metric/imperial conversion
-     */
     private void setConversionSystem(int cnvId)
     {
         log.info("Conversion: " + getResources().getStringArray(R.array.measure_options)[cnvId]);
         if (EcuDataItem.cnvSystem != cnvId)
         {
-            // set coversion system
             EcuDataItem.cnvSystem = cnvId;
         }
     }
 
-    /**
-     * Set up loggers
-     */
     private void setupLoggers()
     {
-        // Apply level first; if logging is OFF, skip creating the log directory and file.
         setLogLevels();
         if (Level.OFF.equals(rootLogger.getLevel())) return;
 
-        // set file handler for log file output
         String logFileName = FileHelper.getPath(this).concat(File.separator).concat("log");
         try
         {
-            // ensure log directory is available
             //noinspection ResultOfMethodCallIgnored
             new File(logFileName).mkdirs();
-            // Create new log file handler (max. 250 MB, 5 files rotated, non appending)
             logFileHandler = new FileHandler(logFileName.concat("/AndrOBD.log.%g.txt"),
                     250 * 1024 * 1024,
                     5,
                     false);
-            // Set log message formatter
             logFileHandler.setFormatter(new SimpleFormatter()
             {
                 final String format = "%1$tF\t%1$tT.%1$tL\t%4$s\t%3$s\t%5$s%n";
 
-                @SuppressLint("DefaultLocale")
                 @Override
                 public synchronized String format(LogRecord lr)
                 {
-                    return String.format(format,
+                    return String.format(Locale.US, format,
                             new Date(lr.getMillis()),
                             lr.getSourceClassName(),
                             lr.getLoggerName(),
@@ -2088,21 +2483,15 @@ public class MainActivity extends PluginManager
                     );
                 }
             });
-            // add file logging ...
             rootLogger.addHandler(logFileHandler);
         } catch (IOException e)
         {
-            // try to log error (at least with system logging)
             log.log(Level.SEVERE, logFileName, e);
         }
     }
 
-    /**
-     * Set logging levels from shared preferences
-     */
     private void setLogLevels()
     {
-        // get level from preferences
         Level level;
         try
         {
@@ -2111,173 +2500,117 @@ public class MainActivity extends PluginManager
         {
             level = Level.INFO;
         }
-
-        // set logger main level
         MainActivity.rootLogger.setLevel(level);
     }
 
-    /**
-     * Load optional extension files which may have
-     * been defined in preferences.
-     * I/O is performed on a background thread to avoid blocking the main thread.
-     */
     private void loadPreferredExtensions()
     {
         final String convFilePath = prefs.getString(SettingsActivity.extKeys[0], null);
-        final String pidFilePath  = prefs.getString(SettingsActivity.extKeys[1], null);
+        final String pidFilePath = prefs.getString(SettingsActivity.extKeys[1], null);
 
-        executor.execute(new Runnable()
-        {
-            @Override
-            public void run()
+        executor.execute(() -> {
+            final StringBuilder errors = new StringBuilder();
+
+            if (convFilePath != null)
             {
-                final StringBuilder errors = new StringBuilder();
-
-                // custom conversions
-                if (convFilePath != null)
+                try (InputStream inStr = getContentResolver().openInputStream(Uri.parse(convFilePath)))
                 {
-                    try (InputStream inStr = getContentResolver().openInputStream(Uri.parse(convFilePath)))
+                    if (inStr != null)
                     {
-                        if (inStr != null)
-                        {
-                            log.info("Load ext. conversions: " + convFilePath);
-                            EcuDataItems.cnv.loadFromStream(inStr);
-                        }
-                    } catch (Exception e)
-                    {
-                        log.log(Level.SEVERE, "Load ext. conversions: ", e);
-                        e.printStackTrace();
-                        errors.append(e.getLocalizedMessage()).append("\n");
+                        log.info("Load ext. conversions: " + convFilePath);
+                        EcuDataItems.cnv.loadFromStream(inStr);
                     }
-                }
-
-                // custom PIDs
-                if (pidFilePath != null)
+                } catch (Exception e)
                 {
-                    try (InputStream inStr = getContentResolver().openInputStream(Uri.parse(pidFilePath)))
+                    log.log(Level.SEVERE, "Load ext. conversions: ", e);
+                    errors.append(e.getLocalizedMessage()).append("\n");
+                }
+            }
+
+            if (pidFilePath != null)
+            {
+                try (InputStream inStr = getContentResolver().openInputStream(Uri.parse(pidFilePath)))
+                {
+                    if (inStr != null)
                     {
-                        if (inStr != null)
-                        {
-                            log.info("Load ext. PIDs: " + pidFilePath);
-                            ObdProt.dataItems.loadFromStream(inStr);
-                        }
-                    } catch (Exception e)
-                    {
-                        log.log(Level.SEVERE, "Load ext. PIDs: ", e);
-                        e.printStackTrace();
-                        errors.append(e.getLocalizedMessage()).append("\n");
+                        log.info("Load ext. PIDs: " + pidFilePath);
+                        ObdProt.dataItems.loadFromStream(inStr);
                     }
-                }
-
-                // show any errors on the main thread
-                if (errors.length() != 0)
+                } catch (Exception e)
                 {
-                    mHandler.post(new Runnable()
-                    {
-                        @Override
-                        public void run()
-                        {
-                            if (!isFinishing() && !isDestroyed())
-                            {
-                                dlgBuilder
-                                        .setIcon(android.R.drawable.ic_dialog_alert)
-                                        .setTitle(R.string.extension_loading)
-                                        .setMessage(getString(R.string.check_cust_settings) + errors)
-                                        .show();
-                            }
-                        }
-                    });
+                    log.log(Level.SEVERE, "Load ext. PIDs: ", e);
+                    errors.append(e.getLocalizedMessage()).append("\n");
                 }
+            }
+
+            if (errors.length() != 0)
+            {
+                mHandler.post(() -> {
+                    if (!isFinishing() && !isDestroyed())
+                    {
+                        dlgBuilder
+                                .setIcon(android.R.drawable.ic_dialog_alert)
+                                .setTitle(R.string.extension_loading)
+                                .setMessage(getString(R.string.check_cust_settings) + errors)
+                                .show();
+                    }
+                });
             }
         });
     }
 
-    /**
-     * Stop demo mode Thread
-     */
     private void stopDemoService()
     {
-        if (getMode() == MODE.DEMO)
+        if (getMode() == MODE.DEMO || ElmProt.runDemo)
         {
             ElmProt.runDemo = false;
             Toast.makeText(this, getString(R.string.demo_stopped), Toast.LENGTH_SHORT).show();
         }
     }
 
-    /**
-     * Start demo mode Thread
-     */
     private void startDemoService()
     {
-        if (getMode() != MODE.DEMO)
+        if (getMode() != MODE.DEMO || !ElmProt.runDemo)
         {
             mode = MODE.DEMO;
             setStatus(getString(R.string.demo));
             Toast.makeText(this, getString(R.string.demo_started), Toast.LENGTH_SHORT).show();
-
-            boolean allowConnect = mBluetoothAdapter != null && mBluetoothAdapter.isEnabled();
-            setMenuItemVisible(R.id.secure_connect_scan, allowConnect);
-            setMenuItemVisible(R.id.disconnect, !allowConnect);
-
-            setMenuItemEnable(R.id.obd_services, true);
-            /* The Thread object for processing the demo mode loop */
+            updateMenuVisibility();
             Thread demoThread = new Thread(CommService.elm);
             demoThread.start();
         }
     }
 
-    /**
-     * set status message in status bar
-     *
-     * @param resId Resource ID of the text to be displayed
-     */
     private void setStatus(int resId)
     {
         setStatus(getString(resId));
     }
 
-    /**
-     * set status message in status bar
-     *
-     * @param subTitle status text to be set
-     */
     private void setStatus(CharSequence subTitle)
     {
         final ActionBar actionBar = getSupportActionBar();
         if (actionBar != null)
         {
             actionBar.setSubtitle(subTitle);
-            // show action bar to make state change visible
             unHideActionBar();
         }
     }
 
-    /**
-     * Select file to be loaded.
-     * Shows a custom dialog listing .obd files from the app's external files directory,
-     * which the SAF file picker cannot browse on Android 11+ due to scoped storage restrictions.
-     */
     private void selectFileToLoad()
     {
         File filesDir = getExternalFilesDir(null);
         File[] obdFiles = (filesDir != null)
-            ? filesDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".obd"))
-            : null;
+                ? filesDir.listFiles((dir, name) -> name.toLowerCase(Locale.ROOT).endsWith(".obd"))
+                : null;
 
         if (obdFiles == null || obdFiles.length == 0)
         {
             Toast.makeText(this, R.string.no_obd_files_found, Toast.LENGTH_SHORT).show();
+            setMode(MODE.OFFLINE);
             return;
         }
 
-        Arrays.sort(obdFiles, new Comparator<File>()
-        {
-            @Override
-            public int compare(File a, File b)
-            {
-                return a.getName().compareTo(b.getName());
-            }
-        });
+        Arrays.sort(obdFiles, Comparator.comparing(File::getName));
         final String[] fileNames = new String[obdFiles.length];
         for (int i = 0; i < obdFiles.length; i++)
         {
@@ -2286,21 +2619,17 @@ public class MainActivity extends PluginManager
         final File[] finalFiles = obdFiles;
 
         new AlertDialog.Builder(this)
-            .setTitle(R.string.load)
-            .setItems(fileNames, (dialog, which) ->
-            {
-                Uri uri = FileProvider.getUriForFile(this,
-                    getPackageName() + ".provider",
-                    finalFiles[which]);
-                loadDataFromUri(uri);
-            })
-            .setNegativeButton(android.R.string.cancel, null)
-            .show();
+                .setTitle(R.string.load)
+                .setItems(fileNames, (dialog, which) -> {
+                    Uri uri = FileProvider.getUriForFile(this,
+                            getPackageName() + ".provider",
+                            finalFiles[which]);
+                    loadDataFromUri(uri);
+                })
+                .setNegativeButton(android.R.string.cancel, (d, w) -> setMode(MODE.OFFLINE))
+                .show();
     }
 
-    /**
-     * clear all preselections
-     */
     private void clearPreselections()
     {
         for (PRESELECT selection : PRESELECT.values())
@@ -2309,100 +2638,80 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /**
-     * Initiate a connect to the selected bluetooth device
-     *
-     * @param address bluetooth device address
-     * @param secure  flag to indicate if the connection shall be secure, or not
-     */
     private void connectBtDevice(String address, boolean secure)
     {
-        // Get the BluetoothDevice object
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
-        // Attempt to connect to the device
         mCommService = new BtCommService(this, mHandler);
         mCommService.connect(device, secure);
     }
 
     /**
-     * Initiate a connect to the selected BLE device
-     *
-     * @param address bluetooth device address
-     * @param secure  flag to indicate if the connection shall be secure, or not
+     * Connect to BLE ELM327 adapter across all supported Android versions (API 23+)
+     * for both public and random BLE MAC addresses.
      */
-    @SuppressLint("NewApi")
     private void connectBleDevice(String address, boolean secure)
     {
-        // Get the BluetoothDevice object
-        BluetoothDevice device = mBluetoothAdapter.getRemoteLeDevice(address, ADDRESS_TYPE_PUBLIC);
-        // Attempt to connect to the device
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-            mCommService = new BleCommService(this, mHandler);
-            mCommService.connect(device, secure);
-        }
+        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
+        mCommService = new BleCommService(this, mHandler);
+        mCommService.connect(device, secure);
     }
 
-    /**
-     * Initiate a connect to the selected network device
-     *
-     * @param address IP device address
-     * @param port    IP port to connect to
-     */
     private void connectNetworkDevice(String address, int port)
     {
-        // Attempt to connect to the device
         mCommService = new NetworkCommService(this, mHandler);
         ((NetworkCommService) mCommService).connect(address, port);
     }
 
-    /**
-     * Activate desired OBD service
-     *
-     * @param newObdService OBD service ID to be activated
-     */
     private void setObdService(int newObdService, CharSequence menuTitle)
     {
-        // remember this as current OBD service
         obdService = newObdService;
         ignoreNrcs = false;
 
-        // set list view
+        if (newObdService == ObdProt.OBD_SVC_NONE)
+        {
+            CommService.elm.setService(newObdService, false);
+            setContentView(R.layout.startup_layout);
+            bindStartupLayout();
+            currDataAdapter = mVidAdapter;
+            setListAdapter(currDataAdapter);
+            final ActionBar ab = getSupportActionBar();
+            if (ab != null)
+            {
+                ab.setTitle(getString(R.string.app_name));
+            }
+            return;
+        }
+
         setContentView(mListView);
         getListView().setOnItemLongClickListener(this);
         getListView().setMultiChoiceModeListener(this);
         getListView().setChoiceMode(ListView.CHOICE_MODE_SINGLE);
 
-        // set title
         final ActionBar ab = getSupportActionBar();
-        if (ab != null)
+        if (ab != null && menuTitle != null)
         {
-            // title specified ... show it
-            if (menuTitle != null)
-            {
-                ab.setTitle(menuTitle);
-            } else
-            {
-                // no title specified, set to app name if no service set
-                if (newObdService == ElmProt.OBD_SVC_NONE)
-                {
-                    ab.setTitle(getString(R.string.app_name));
-                }
-            }
+            ab.setTitle(menuTitle);
         }
-        // set protocol service
-        CommService.elm.setService(newObdService, (getMode() != MODE.FILE && getMode() != MODE.OFFLINE));
-        // show / hide freeze frame selector */
-        Spinner ff_selector = findViewById(R.id.ff_selector);
-        ff_selector.setOnItemSelectedListener(ff_selected);
-        ff_selector.setAdapter(mDfcAdapter);
-        ff_selector.setVisibility(
-                newObdService == ObdProt.OBD_SVC_FREEZEFRAME ? View.VISIBLE : View.GONE);
-        // set corresponding list adapter
+
+        CommService.elm.setService(newObdService,
+                (getMode() != MODE.FILE && getMode() != MODE.OFFLINE));
+
+        Spinner ff_selector = mListView.findViewById(R.id.ff_selector);
+        if (ff_selector != null)
+        {
+            ff_selector.setOnItemSelectedListener(ff_selected);
+            ff_selector.setAdapter(mDfcAdapter);
+            ff_selector.setVisibility(
+                    newObdService == ObdProt.OBD_SVC_FREEZEFRAME ? View.VISIBLE : View.GONE);
+        }
+
         switch (newObdService)
         {
             case ObdProt.OBD_SVC_DATA:
                 getListView().setChoiceMode(ListView.CHOICE_MODE_MULTIPLE_MODAL);
-                // no break here
+                currDataAdapter = mPidAdapter;
+                break;
+
             case ObdProt.OBD_SVC_FREEZEFRAME:
                 currDataAdapter = mPidAdapter;
                 break;
@@ -2410,39 +2719,32 @@ public class MainActivity extends PluginManager
             case ObdProt.OBD_SVC_PENDINGCODES:
             case ObdProt.OBD_SVC_PERMACODES:
             case ObdProt.OBD_SVC_READ_CODES:
-                // NOT all DFC modes are supported by all vehicles, disable NRC handling for this request
                 ignoreNrcs = true;
                 currDataAdapter = mDfcAdapter;
-                Toast.makeText(this, getString(R.string.long_press_dfc_hint), Toast.LENGTH_LONG).show();
                 break;
 
             case ObdProt.OBD_SVC_CTRL_MODE:
                 currDataAdapter = mTidAdapter;
                 break;
 
-            case ObdProt.OBD_SVC_NONE:
-                setContentView(R.layout.startup_layout);
-                // intentionally no break to initialize adapter
             case ObdProt.OBD_SVC_VEH_INFO:
+            default:
                 currDataAdapter = mVidAdapter;
                 break;
         }
 
-        // un-filter display
         setFiltered(false);
-
         setListAdapter(currDataAdapter);
 
-        // remember this as last selected service
+        refreshDataHeaderUi();
+        refreshDataListStats();
+
         if (newObdService > ObdProt.OBD_SVC_NONE)
         {
             prefs.edit().putInt(PRESELECT.LAST_SERVICE.toString(), newObdService).apply();
         }
     }
 
-    /**
-     * Filter display items to just the selected ones
-     */
     private void setFiltered(boolean filtered)
     {
         if (filtered)
@@ -2463,190 +2765,119 @@ public class MainActivity extends PluginManager
             if (currDataAdapter == mPidAdapter)
                 ObdProt.resetFixedPid();
 
-            /* Return to original PV list */
             if (currDataAdapter == mPidAdapter)
             {
                 currDataAdapter.setPvList(ObdProt.PidPvs);
-                // append plugin measurements to data list
-                currDataAdapter.addAll(mPluginPvs.values());
             } else if (currDataAdapter == mVidAdapter)
+            {
                 currDataAdapter.setPvList(ObdProt.VidPvs);
-            else if (currDataAdapter == mDfcAdapter)
+            } else if (currDataAdapter == mDfcAdapter)
+            {
                 currDataAdapter.setPvList(ObdProt.tCodes);
-            else if (currDataAdapter == mPluginDataAdapter)
+            } else if (currDataAdapter == mPluginDataAdapter)
+            {
                 currDataAdapter.setPvList(mPluginPvs);
-
+            }
         }
     }
 
-    /**
-     * get the Position in model of the selected items
-     *
-     * @return Array of selected item positions
-     */
     private int[] getSelectedPositions()
     {
         int[] selectedPositions;
-        // SparseBoolArray - what a garbage data type to return ...
         final SparseBooleanArray checkedItems = getListView().getCheckedItemPositions();
-        // get number of items
         int checkedItemsCount = getListView().getCheckedItemCount();
-        // dimension array
         selectedPositions = new int[checkedItemsCount];
         if (checkedItemsCount > 0)
         {
             int j = 0;
-            // loop through findings
             for (int i = 0; i < checkedItems.size(); i++)
             {
-                // Item position in adapter
                 if (checkedItems.valueAt(i))
                 {
                     selectedPositions[j++] = checkedItems.keyAt(i);
                 }
             }
-            // trim to really detected value (workaround for invalid length reported)
             selectedPositions = Arrays.copyOf(selectedPositions, j);
         }
         String strPreselect = Arrays.toString(selectedPositions);
         log.fine("Preselection: '" + strPreselect + "'");
-        // save this as last seleted positions
-        prefs.edit().putString(PRESELECT.LAST_ITEMS.toString(), strPreselect)
-                .apply();
+        prefs.edit().putString(PRESELECT.LAST_ITEMS.toString(), strPreselect).apply();
         return selectedPositions;
     }
 
-    /**
-     * Set selection status on specified list item positions
-     *
-     * @param positions list of positions to be set
-     * @return flag if selections could be applied
-     */
     private boolean selectDataItems(int[] positions)
     {
-        int count;
-        int max;
-        boolean positionsValid;
-
         Arrays.sort(positions);
-        max = positions.length > 0 ? positions[positions.length - 1] : 0;
-        count = getListAdapter().getCount();
-        positionsValid = (max < count);
-        // if all positions are valid for current list ...
+        int max = positions.length > 0 ? positions[positions.length - 1] : 0;
+        int count = getListAdapter().getCount();
+        boolean positionsValid = (max < count);
         if (positionsValid)
         {
-            // set list items as selected
             for (int i : positions)
             {
                 getListView().setItemChecked(i, true);
             }
         }
-
-        // return validity of positions
         return positionsValid;
     }
 
-    /**
-     * Handle bluetooth connection established ...
-     */
     @SuppressLint("StringFormatInvalid")
     private void onConnect()
     {
         stopDemoService();
-
         mode = MODE.ONLINE;
-        // Menu visibility will be handled by updateMenuVisibility() call in setMode
-        
+        updateMenuVisibility();
+        refreshAllUi();
         setMenuItemEnable(R.id.obd_services, true);
-        // display connection status
         setStatus(getString(R.string.title_connected_to, mConnectedDeviceName));
-        // send RESET to Elm adapter
         CommService.elm.reset();
     }
 
-    /**
-     * Handle bluetooth connection lost ...
-     */
     private void onDisconnect()
     {
-        // handle further initialisations
         setMode(MODE.OFFLINE);
     }
 
-    /**
-     * Property change listener to ELM-Protocol
-     *
-     * @param evt the property change event to be handled
-     */
+    @Override
     public void propertyChange(PropertyChangeEvent evt)
     {
-        /* handle protocol status changes */
         if (ElmProt.PROP_STATUS.equals(evt.getPropertyName()))
         {
-            // forward property change to the UI Activity
             Message msg = mHandler.obtainMessage(MESSAGE_OBD_STATE_CHANGED);
             msg.obj = evt;
             mHandler.sendMessage(msg);
-        } else
+        } else if (ElmProt.PROP_NUM_CODES.equals(evt.getPropertyName()))
         {
-            if (ElmProt.PROP_NUM_CODES.equals(evt.getPropertyName()))
-            {
-                // forward property change to the UI Activity
-                Message msg = mHandler.obtainMessage(MESSAGE_OBD_NUMCODES);
-                msg.obj = evt;
-                mHandler.sendMessage(msg);
-            } else
-            {
-                if (ElmProt.PROP_ECU_ADDRESS.equals(evt.getPropertyName()))
-                {
-                    // forward property change to the UI Activity
-                    Message msg = mHandler.obtainMessage(MESSAGE_OBD_ECUS);
-                    msg.obj = evt;
-                    mHandler.sendMessage(msg);
-                } else
-                {
-                    if (ObdProt.PROP_NRC.equals(evt.getPropertyName()))
-                    {
-                        // forward property change to the UI Activity
-                        Message msg = mHandler.obtainMessage(MESSAGE_OBD_NRC);
-                        msg.obj = evt;
-                        mHandler.sendMessage(msg);
-                    }
-                }
-            }
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_NUMCODES);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        } else if (ElmProt.PROP_ECU_ADDRESS.equals(evt.getPropertyName()))
+        {
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_ECUS);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        } else if (ObdProt.PROP_NRC.equals(evt.getPropertyName()))
+        {
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_NRC);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
         }
     }
 
-    /**
-     * clear OBD fault codes after a warning
-     * confirmation dialog is shown and the operation is confirmed
-     */
     private void clearObdFaultCodes()
     {
         dlgBuilder
                 .setIcon(android.R.drawable.ic_dialog_info)
                 .setTitle(R.string.obd_clearcodes)
                 .setMessage(R.string.obd_clear_info)
-                .setPositiveButton(android.R.string.yes,
-                        new DialogInterface.OnClickListener()
-                        {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which)
-                            {
-                                // set service CLEAR_CODES to clear the codes
-                                CommService.elm.setService(ObdProt.OBD_SVC_CLEAR_CODES);
-                                // set service READ_CODES to re-read the codes
-                                CommService.elm.setService(ObdProt.OBD_SVC_READ_CODES);
-                            }
-                        })
+                .setPositiveButton(android.R.string.yes, (dialog, which) -> {
+                    CommService.elm.setService(ObdProt.OBD_SVC_CLEAR_CODES);
+                    CommService.elm.setService(ObdProt.OBD_SVC_READ_CODES);
+                })
                 .setNegativeButton(android.R.string.no, null)
                 .show();
     }
 
-    /**
-     * confirm OBD test control
-     * confirmation dialog is shown and the operation is confirmed
-     */
     private void confirmObdTestControl(String testControlName, int service, int tid)
     {
         dlgBuilder
@@ -2654,56 +2885,30 @@ public class MainActivity extends PluginManager
                 .setTitle(testControlName)
                 .setMessage(R.string.obd_test_confirm)
                 .setPositiveButton(android.R.string.yes,
-                        new DialogInterface.OnClickListener()
-                        {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which)
-                            {
-                                runObdTestControl(testControlName, service, tid);
-                            }
-                        })
+                        (dialog, which) -> runObdTestControl(testControlName, service, tid))
                 .setNegativeButton(android.R.string.no, null)
                 .show();
     }
 
-    /**
-     * perform OBD test control
-     * confirmation dialog is shown and the operation is confirmed
-     */
     private void runObdTestControl(String testControlName, int service, int tid)
     {
-        // start desired test TID
         char[] emptyBuffer = {};
         CommService.elm.writeTelegram(emptyBuffer, service, tid);
 
-        // Show test progress message
         dlgBuilder
                 .setIcon(android.R.drawable.ic_dialog_info)
                 .setTitle(testControlName)
                 .setMessage(R.string.obd_test_progress)
-                .setPositiveButton(android.R.string.ok,
-                        new DialogInterface.OnClickListener()
-                        {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which)
-                            {
-                            }
-                        })
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> { })
                 .setNegativeButton(null, null)
                 .show();
     }
 
-    /**
-     * Set new data view mode
-     *
-     * @param dataViewMode new data view mode
-     */
     private void setDataViewMode(DATA_VIEW_MODE dataViewMode)
     {
-        // if this is a real change ...
         if (dataViewMode != this.dataViewMode)
         {
-            log.info(String.format("Set view mode: %s -> %s", this.dataViewMode, dataViewMode));
+            log.info(String.format(Locale.US, "Set view mode: %s -> %s", this.dataViewMode, dataViewMode));
 
             switch (dataViewMode)
             {
@@ -2744,14 +2949,14 @@ public class MainActivity extends PluginManager
                         ChartActivity.setAdapter(getListAdapter());
                         Intent intent = new Intent(this, ChartActivity.class);
                         intent.putExtra(ChartActivity.POSITIONS, getSelectedPositions());
-                        intent.putExtra(ChartActivity.LIVE_UPDATE, Set.of(MODE.ONLINE, MODE.DEMO).contains(getMode()));
+                        intent.putExtra(ChartActivity.LIVE_UPDATE,
+                                Set.of(MODE.ONLINE, MODE.DEMO).contains(getMode()));
                         startActivityForResult(intent, REQUEST_GRAPH_DISPLAY_DONE);
                         this.dataViewMode = dataViewMode;
                     }
                     break;
             }
 
-            // remember this as the last data view mode (if not regular list)
             if (dataViewMode != DATA_VIEW_MODE.LIST)
             {
                 prefs.edit().putString(PRESELECT.LAST_VIEW_MODE.toString(), dataViewMode.toString())
@@ -2764,7 +2969,6 @@ public class MainActivity extends PluginManager
     public void onDataListUpdate(String csvString)
     {
         log.log(Level.FINE, "PluginDataList: " + csvString);
-        // append unknown items to list of known items
         synchronized (mPluginPvs)
         {
             for (String csvLine : csvString.split("\n"))
@@ -2772,19 +2976,15 @@ public class MainActivity extends PluginManager
                 String[] fields = csvLine.split(";");
                 if (fields.length >= Plugin.CsvField.values().length)
                 {
-                    // check if PV already is known ...
                     PluginDataPv pv = (PluginDataPv) mPluginPvs.get(fields[Plugin.CsvField.MNEMONIC.ordinal()]);
-                    // if not, create a new one
                     if (pv == null)
                     {
                         pv = new PluginDataPv();
                     }
-                    // fill field content
                     for (Plugin.CsvField fld : Plugin.CsvField.values())
                     {
                         try
                         {
-                            // if content is numeric, set numeric value
                             Double value = Double.valueOf(fields[fld.ordinal()]);
                             pv.put(csvFidMap[fld.ordinal()], value);
                         } catch (Exception ex)
@@ -2792,7 +2992,6 @@ public class MainActivity extends PluginManager
                             pv.put(csvFidMap[fld.ordinal()], fields[fld.ordinal()]);
                         }
                     }
-                    // add/update into pv list
                     mPluginPvs.put(pv.getKeyValue(), pv);
                 }
             }
@@ -2803,7 +3002,6 @@ public class MainActivity extends PluginManager
     public void onDataUpdate(String key, String value)
     {
         log.log(Level.FINE, "PluginData: " + key + "=" + value);
-        // Update value of plugin data item
         synchronized (mPluginPvs)
         {
             ProcessVar pv = (ProcessVar) mPluginPvs.get(key);
@@ -2811,7 +3009,6 @@ public class MainActivity extends PluginManager
             {
                 try
                 {
-                    // if content is numeric, set numeric value
                     Double numVal = Double.valueOf(value);
                     pv.put(EcuDataPv.FIELDS[EcuDataPv.FID_VALUE], numVal);
                 } catch (Exception ex)
@@ -2822,36 +3019,23 @@ public class MainActivity extends PluginManager
         }
     }
 
-    /*
-     * Implementations of PluginManager data interface callbacks
-     */
-
-    /**
-     * operating modes
-     */
     public enum MODE
     {
-        OFFLINE,//< OFFLINE mode
-        ONLINE,    //< ONLINE mode
-        DEMO,    //< DEMO mode
-        FILE,   //< FILE mode
+        OFFLINE,
+        ONLINE,
+        DEMO,
+        FILE,
     }
 
-    /**
-     * data view modes
-     */
     public enum DATA_VIEW_MODE
     {
-        LIST,       //< data list (un-filtered)
-        FILTERED,   //< data list (filtered)
-        DASHBOARD,  //< dashboard
-        HEADUP,     //< Head up display
-        CHART,        //< Chart display
+        LIST,
+        FILTERED,
+        DASHBOARD,
+        HEADUP,
+        CHART,
     }
 
-    /**
-     * Preselection types
-     */
     public enum PRESELECT
     {
         LAST_DEV_ADDRESS,

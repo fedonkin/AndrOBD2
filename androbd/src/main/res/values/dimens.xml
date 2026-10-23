@@ -1,6 +1,6 @@
 <resources>
-
-    <!-- Default screen margins, per the Android Design guidelines. -->
+    <!-- Default screen margins -->
     <dimen name="activity_horizontal_margin">16dp</dimen>
-
+    <dimen name="card_corner_radius">16dp</dimen>
+    <dimen name="item_corner_radius">12dp</dimen>
 </resources>

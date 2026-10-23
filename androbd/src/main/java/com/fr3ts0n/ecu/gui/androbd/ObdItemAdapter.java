@@ -21,13 +21,18 @@ package com.fr3ts0n.ecu.gui.androbd;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.PorterDuff;
+import android.graphics.drawable.Drawable;
 import android.preference.PreferenceManager;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.androbd.plugin.mgr.PluginManager;
 import com.fr3ts0n.ecu.Conversion;
@@ -45,43 +50,44 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
- * Adapter for OBD data items (PVs)
- *
- * @author erwin
+ * Adapter for OBD data items (PVs) with live search filtering and modern card rendering.
  */
 class ObdItemAdapter extends ArrayAdapter<Object>
         implements PvChangeListener
 {
-    /**
-     * ViewHolder class for efficient view recycling
-     * Improves ListView performance significantly
-     */
-    private static class ViewHolder {
-        TextView tvDescr;
-        TextView tvValue;
-        TextView tvUnits;
-        ProgressBar progressBar;
-        
-        ViewHolder(View convertView) {
+    private static class ViewHolder
+    {
+        final View itemAccent;
+        final ImageView ivIcon;
+        final TextView tvDescr;
+        final TextView tvSublabel;
+        final TextView tvValue;
+        final TextView tvUnits;
+        final ProgressBar progressBar;
+
+        ViewHolder(View convertView)
+        {
+            itemAccent = convertView.findViewById(R.id.item_accent);
+            ivIcon = convertView.findViewById(R.id.obd_icon);
             tvDescr = convertView.findViewById(R.id.obd_label);
+            tvSublabel = convertView.findViewById(R.id.obd_sublabel);
             tvValue = convertView.findViewById(R.id.obd_value);
             tvUnits = convertView.findViewById(R.id.obd_units);
             progressBar = convertView.findViewById(R.id.bar);
         }
     }
-    
+
     transient PvList pvs;
     final transient LayoutInflater mInflater;
     transient static final String FID_DATA_SERIES = "SERIES";
-    /**
-     * allow data updates to be handled
-     */
     static boolean allowDataUpdates = true;
     private final transient SharedPreferences prefs;
-
+    private String searchQuery = "";
+    private boolean includePluginPvs = false;
 
     public ObdItemAdapter(Context context, int resource, PvList pvs)
     {
@@ -92,23 +98,86 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         setPvList(pvs);
     }
 
+    void setIncludePluginPvs(boolean include)
+    {
+        this.includePluginPvs = include;
+    }
+
+    synchronized void setSearchQuery(String query)
+    {
+        String normalized = (query == null) ? "" : query.trim();
+        if (!normalized.equals(this.searchQuery))
+        {
+            this.searchQuery = normalized;
+            if (this.pvs != null)
+            {
+                setPvList(this.pvs);
+            }
+        }
+    }
+
+    String getSearchQuery()
+    {
+        return searchQuery;
+    }
+
+    private boolean matchesSearch(Object obj, String lowerQuery)
+    {
+        if (lowerQuery.isEmpty()) return true;
+        if (!(obj instanceof IndexedProcessVar)) return true;
+        IndexedProcessVar pv = (IndexedProcessVar) obj;
+        Object descr = pv.get(EcuDataPv.FID_DESCRIPT);
+        if (descr != null && String.valueOf(descr).toLowerCase(Locale.getDefault()).contains(lowerQuery))
+        {
+            return true;
+        }
+        Object mnem = pv.get(EcuDataPv.FID_MNEMONIC);
+        if (mnem != null && String.valueOf(mnem).toLowerCase(Locale.ROOT).contains(lowerQuery))
+        {
+            return true;
+        }
+        if (pv instanceof EcuDataPv)
+        {
+            String units = ((EcuDataPv) pv).getUnits();
+            if (units != null && units.toLowerCase(Locale.getDefault()).contains(lowerQuery))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * set / update PV list
-     *
-     * @param pvs process variable list
      */
     @SuppressWarnings("unchecked")
     public synchronized void setPvList(PvList pvs)
     {
         this.pvs = pvs;
-        // get set to be displayed (filtered with preferences */
-        Collection<Object> filtered = getPreferredItems(pvs);
-        // make it a sorted array
+        Collection<Object> raw = new ArrayList<>();
+        if (pvs != null)
+        {
+            raw.addAll(getPreferredItems(pvs));
+        }
+        if (includePluginPvs && MainActivity.mPluginPvs != null && !MainActivity.mPluginPvs.isEmpty())
+        {
+            raw.addAll(MainActivity.mPluginPvs.values());
+        }
+
+        String lowerQuery = searchQuery == null ? "" : searchQuery.toLowerCase(Locale.getDefault());
+        ArrayList<Object> filtered = new ArrayList<>(raw.size());
+        for (Object item : raw)
+        {
+            if (item != null && matchesSearch(item, lowerQuery))
+            {
+                filtered.add(item);
+            }
+        }
+
         Object[] pidPvs = filtered.toArray();
         Arrays.sort(pidPvs, pidSorter);
 
         clear();
-        // add all elements
         addAll(pidPvs);
     }
 
@@ -117,41 +186,24 @@ class ObdItemAdapter extends ArrayAdapter<Object>
     {
         public int compare(Object lhs, Object rhs)
         {
-            // criteria 1: ID string
             int result = lhs.toString().compareTo(rhs.toString());
-
-            // criteria 2: description
             if (result == 0)
             {
                 result = String.valueOf(((IndexedProcessVar) lhs).get(EcuDataPv.FID_DESCRIPT))
                         .compareTo(String.valueOf(((IndexedProcessVar) rhs).get(EcuDataPv.FID_DESCRIPT)));
             }
-            // return compare result
             return result;
         }
     };
 
-    /**
-     * get set of data items filtered with set of preferred items to be displayed
-     *
-     * @param pvs list of PVs to be handled
-     * @return Set of filtered data items
-     */
+    @SuppressWarnings("unchecked")
     Collection getPreferredItems(PvList pvs)
     {
-        // filter PVs with preference selections
         Set<String> pidsToShow = prefs.getStringSet(SettingsActivity.KEY_DATA_ITEMS,
-                                                    (Set<String>) pvs.keySet());
+                (Set<String>) pvs.keySet());
         return getMatchingItems(pvs, pidsToShow);
     }
 
-    /**
-     * get set of data items filtered with set of preferred items to be displayed
-     *
-     * @param pvs        list of PVs to be handled
-     * @param pidsToShow Set of keys to be used as filter
-     * @return Set of filtered data items
-     */
     private Collection<Object> getMatchingItems(PvList pvs, Set<String> pidsToShow)
     {
         HashSet<Object> filtered = new HashSet<>();
@@ -161,32 +213,38 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             if (pv != null)
                 filtered.add(pv);
         }
-        return (filtered);
+        return filtered;
     }
 
     void filterPositions(int[] positions)
     {
         ArrayList<EcuDataPv> filtered = new ArrayList<>();
-        for(int pos : positions)
+        for (int pos : positions)
         {
-            filtered.add((EcuDataPv)getItem(pos));
+            EcuDataPv item = (EcuDataPv) getItem(pos);
+            if (item != null)
+            {
+                filtered.add(item);
+            }
         }
         clear();
         addAll(filtered);
     }
 
-    /*
-     * (non-Javadoc)
-     *
-     * @see android.widget.ArrayAdapter#getView(int, android.view.View,
-     * android.view.ViewGroup)
-     */
+    protected static void tintViewBackground(View view, int color)
+    {
+        if (view == null) return;
+        Drawable bg = view.getBackground();
+        if (bg != null)
+        {
+            bg.mutate().setColorFilter(color, PorterDuff.Mode.SRC_IN);
+        }
+    }
+
     @Override
     public View getView(int position, View convertView, ViewGroup parent)
     {
         ViewHolder holder;
-        
-        // get data PV
         EcuDataPv currPv = (EcuDataPv) getItem(position);
 
         if (convertView == null)
@@ -194,77 +252,111 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             convertView = mInflater.inflate(R.layout.obd_item, parent, false);
             holder = new ViewHolder(convertView);
             convertView.setTag(holder);
-        } else {
-            holder = (ViewHolder) convertView.getTag();
+        } else
+        {
+            Object tag = convertView.getTag();
+            if (tag instanceof ViewHolder)
+            {
+                holder = (ViewHolder) tag;
+            } else
+            {
+                holder = new ViewHolder(convertView);
+                convertView.setTag(holder);
+            }
         }
 
-        // fill view fields with data
-        
-        // description text
-        holder.tvDescr.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
-        
-        // format value string
+        if (currPv == null)
+        {
+            return convertView;
+        }
+
+        holder.ivIcon.setVisibility(View.GONE);
+        holder.itemAccent.setVisibility(View.VISIBLE);
+        holder.tvValue.setVisibility(View.VISIBLE);
+        holder.tvValue.setTextColor(ContextCompat.getColor(getContext(), R.color.text_primary));
+
+        String description = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
+        holder.tvDescr.setText(description);
+
+        Object mnemonicObj = currPv.get(EcuDataPv.FID_MNEMONIC);
+        String mnemonic = mnemonicObj != null ? String.valueOf(mnemonicObj) : "";
+        if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
+        {
+            holder.tvSublabel.setText(mnemonic);
+            holder.tvSublabel.setVisibility(View.VISIBLE);
+        } else
+        {
+            holder.tvSublabel.setVisibility(View.GONE);
+        }
+
         String fmtText;
         Object colVal = currPv.get(EcuDataPv.FID_VALUE);
         Object cnvObj = currPv.get(EcuDataPv.FID_CNVID);
         Number min = (Number) currPv.get(EcuDataPv.FID_MIN);
         Number max = (Number) currPv.get(EcuDataPv.FID_MAX);
-        int pid = currPv.getAsInt(EcuDataPv.FID_PID);
-        // Get display color ...
         int pidColor = ColorAdapter.getItemColor(currPv);
+        tintViewBackground(holder.itemAccent, pidColor);
 
         try
         {
-            // format text output
             if (cnvObj instanceof Conversion[]
-                && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] != null
-            )
+                    && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] != null)
             {
-                // format throuch assigned conversion
-                Conversion cnv;
-                cnv = ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem];
-                // set formatted text
+                Conversion cnv = ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem];
                 fmtText = cnv.physToPhysFmtString((Number) colVal,
-                                                  (String) currPv.get(EcuDataPv.FID_FORMAT));
+                        (String) currPv.get(EcuDataPv.FID_FORMAT));
             } else
             {
-                // plain format
-                fmtText = String.valueOf(colVal);
+                fmtText = colVal != null ? String.valueOf(colVal) : "—";
             }
 
-            // set progress bar only on numeric values with min/max limits
             if (min != null
                     && max != null
-                    && colVal instanceof Number)
+                    && colVal instanceof Number
+                    && max.doubleValue() > min.doubleValue())
             {
                 holder.progressBar.setVisibility(ProgressBar.VISIBLE);
-                holder.progressBar.getProgressDrawable().setColorFilter(pidColor, PorterDuff.Mode.SRC_IN);
-                holder.progressBar.setProgress((int) (100 * ((((Number) colVal).doubleValue() - min.doubleValue()) / (max.doubleValue() - min.doubleValue()))));
+                Drawable progDrawable = holder.progressBar.getProgressDrawable();
+                if (progDrawable != null)
+                {
+                    progDrawable.mutate().setColorFilter(pidColor, PorterDuff.Mode.SRC_IN);
+                }
+                double ratio = (((Number) colVal).doubleValue() - min.doubleValue())
+                        / (max.doubleValue() - min.doubleValue());
+                int pct = (int) Math.round(100.0 * Math.max(0.0, Math.min(1.0, ratio)));
+                holder.progressBar.setProgress(pct);
             } else
             {
                 holder.progressBar.setVisibility(ProgressBar.GONE);
             }
-
         } catch (Exception ex)
         {
-            fmtText = String.valueOf(colVal);
+            fmtText = colVal != null ? String.valueOf(colVal) : "—";
+            holder.progressBar.setVisibility(ProgressBar.GONE);
         }
-        // set value
+
+        holder.tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                (!(colVal instanceof Number) && fmtText.length() > 10) ? 14f : 19f);
         holder.tvValue.setText(fmtText);
-        holder.tvUnits.setText(currPv.getUnits());
+
+        String units = currPv.getUnits();
+        if (units != null && !units.trim().isEmpty())
+        {
+            holder.tvUnits.setText(units);
+            holder.tvUnits.setVisibility(View.VISIBLE);
+        } else
+        {
+            holder.tvUnits.setVisibility(View.GONE);
+        }
 
         return convertView;
     }
 
-    /**
-     * Handler for data item changes
-     */
     PvChangeListener dataChangeHandler = new PvChangeListener()
     {
         @Override
         public void pvChanged(PvChangeEvent event)
         {
-            // handle data item updates
             if (allowDataUpdates)
             {
                 IndexedProcessVar pv = (IndexedProcessVar) event.getSource();
@@ -274,12 +366,10 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                     if (event.getValue() instanceof Number)
                     {
                         series.add(event.getTime(),
-                                   ((Number) event.getValue()).doubleValue());
-
+                                ((Number) event.getValue()).doubleValue());
                     }
                 }
 
-                // send update to plugin handler
                 if (PluginManager.pluginHandler != null)
                 {
                     PluginManager.pluginHandler.sendDataUpdate(
@@ -290,15 +380,13 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         }
     };
 
-    /**
-     * Add data series to all process variables
-     */
     protected synchronized void addAllDataSeries()
     {
         StringBuilder pluginStr = new StringBuilder();
         for (int pos = 0; pos < getCount(); pos++)
         {
-            IndexedProcessVar pv = (IndexedProcessVar)getItem(pos);
+            IndexedProcessVar pv = (IndexedProcessVar) getItem(pos);
+            if (pv == null) continue;
             XYSeries series = (XYSeries) pv.get(FID_DATA_SERIES);
             if (series == null)
             {
@@ -307,16 +395,14 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 pv.addPvChangeListener(dataChangeHandler, PvChangeEvent.PV_MODIFIED);
             }
 
-            // assemble data items for plugin notification
-            pluginStr.append(String.format("%s;%s;%s;%s\n",
-                                           pv.get(EcuDataPv.FID_MNEMONIC),
-                                           pv.get(EcuDataPv.FID_DESCRIPT),
-                                           String.valueOf(pv.get(EcuDataPv.FID_VALUE)),
-                                           pv.get(EcuDataPv.FID_UNITS)
+            pluginStr.append(String.format(Locale.US, "%s;%s;%s;%s\n",
+                    pv.get(EcuDataPv.FID_MNEMONIC),
+                    pv.get(EcuDataPv.FID_DESCRIPT),
+                    String.valueOf(pv.get(EcuDataPv.FID_VALUE)),
+                    pv.get(EcuDataPv.FID_UNITS)
             ));
         }
 
-        // notify plugins
         if (PluginManager.pluginHandler != null)
         {
             PluginManager.pluginHandler.sendDataList(pluginStr.toString());
@@ -327,24 +413,20 @@ class ObdItemAdapter extends ArrayAdapter<Object>
     public void addAll(Collection<?> collection)
     {
         super.addAll(collection);
-        // get array sorted
         sort(pidSorter);
 
         if (this.getClass() == ObdItemAdapter.class)
             addAllDataSeries();
-
     }
 
     @Override
     public void pvChanged(PvChangeEvent event)
     {
-        // handle data list updates
         switch (event.getType())
         {
             case PvChangeEvent.PV_ADDED:
-                PvList pvList = (PvList)event.getSource();
-                clear();
-                addAll(pvList.values());
+                PvList pvList = (PvList) event.getSource();
+                setPvList(pvList);
                 break;
 
             case PvChangeEvent.PV_DELETED:

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_screen">#0B101B</color>
+    <color name="bg_surface">#141C2B</color>
+    <color name="bg_surface_elevated">#1E293B</color>
+    <color name="stroke_card">#27354C</color>
+
+    <color name="text_primary">#F1F5F9</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_tertiary">#64748B</color>
+
+    <color name="accent_primary">#3B82F6</color>
+    <color name="accent_primary_soft">#1E3A5F</color>
+    <color name="accent_on_primary">#FFFFFF</color>
+
+    <color name="status_online">#34D399</color>
+    <color name="status_online_bg">#064E3B</color>
+    <color name="status_demo">#FBBF24</color>
+    <color name="status_demo_bg">#451A03</color>
+    <color name="status_offline">#94A3B8</color>
+    <color name="status_offline_bg">#1E293B</color>
+    <color name="status_danger">#F87171</color>
+    <color name="status_danger_bg">#450A0A</color>
+
+    <color name="progress_track">#223047</color>
+    <color name="row_activated">#333B82F6</color>
+</resources>

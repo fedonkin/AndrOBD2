@@ -12,23 +12,22 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 
-import androidx.annotation.RequiresApi;
+import androidx.annotation.NonNull;
 import androidx.annotation.RequiresPermission;
-import androidx.core.app.ActivityCompat;
 
 import com.fr3ts0n.prot.ProtUtils;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-@RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
 public class BleCommService
         extends CommService
         implements TelegramWriter, TelegramListener
@@ -46,7 +45,7 @@ public class BleCommService
     private static final UUID LE_NEXAS_TX       = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
 
     private static final UUID LE_NRF_SERVICE    = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
-    private static final UUID LE_NRF_CHAR_RW2   = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e"); // read on microbit, write on adafruit
+    private static final UUID LE_NRF_CHAR_RW2   = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID LE_NRF_CHAR_RW3   = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
 
     private static final UUID LE_MICROCHIP_SERVICE    = UUID.fromString("49535343-FE7D-4AE5-8FA9-9FAFD205E455");
@@ -54,10 +53,8 @@ public class BleCommService
     private static final UUID LE_MICROCHIP_CHAR_W     = UUID.fromString("49535343-8841-43F4-A8D4-ECBE34729BB3");
 
     private static final UUID LE_TIO_SERVICE          = UUID.fromString("0000FEFB-0000-1000-8000-00805F9B34FB");
-    private static final UUID LE_TIO_CHAR_TX          = UUID.fromString("00000001-0000-1000-8000-008025000000"); // WNR
-    private static final UUID LE_TIO_CHAR_RX          = UUID.fromString("00000002-0000-1000-8000-008025000000"); // N
-    private static final UUID LE_TIO_CHAR_TX_CREDITS  = UUID.fromString("00000003-0000-1000-8000-008025000000"); // W
-    private static final UUID LE_TIO_CHAR_RX_CREDITS  = UUID.fromString("00000004-0000-1000-8000-008025000000"); // I
+    private static final UUID LE_TIO_CHAR_TX          = UUID.fromString("00000001-0000-1000-8000-008025000000");
+    private static final UUID LE_TIO_CHAR_RX          = UUID.fromString("00000002-0000-1000-8000-008025000000");
 
     /* Table of UUIDs for each service and corresponding RX/TX characteristics */
     private static final Map<UUID, UUID[]> serialUUIDs = Map.of(
@@ -78,7 +75,6 @@ public class BleCommService
 
     BleCommService(Context context, Handler handler) {
         super(context, handler);
-        // set up protocol handlers
         elm.addTelegramWriter(this);
     }
 
@@ -87,37 +83,51 @@ public class BleCommService
     }
 
     @Override
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    public void stop() {
-        gatt.disconnect();
+    @SuppressLint("MissingPermission")
+    public synchronized void stop() {
+        elm.removeTelegramWriter(this);
+        if (gatt != null) {
+            try {
+                gatt.disconnect();
+                gatt.close();
+            } catch (Exception ex) {
+                log.log(SEVERE, "BLE stop", ex);
+            }
+            gatt = null;
+        }
+        rxCharacteristic = null;
+        txCharacteristic = null;
+        setState(STATE.OFFLINE);
     }
 
     @Override
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
     public void write(byte[] out) {
-        if(gatt != null && txCharacteristic != null)
-        {
+        if (gatt != null && txCharacteristic != null) {
+            int props = txCharacteristic.getProperties();
+            int writeType = ((props & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0
+                    && (props & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0)
+                    ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(txCharacteristic, out, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                gatt.writeCharacteristic(txCharacteristic, out, writeType);
             } else {
                 txCharacteristic.setValue(out);
-                txCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                txCharacteristic.setWriteType(writeType);
                 gatt.writeCharacteristic(txCharacteristic);
             }
         }
     }
 
     @Override
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     public int writeTelegram(char[] buffer) {
         log.finer("TX: " + ProtUtils.hexDumpBuffer(buffer));
         String tgm = String.valueOf(buffer) + "\r";
-        write(tgm.getBytes());
+        write(tgm.getBytes(StandardCharsets.UTF_8));
         return buffer.length;
     }
 
     @Override
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     public int writeTelegram(char[] buffer, int type, Object id) {
         return writeTelegram(buffer);
     }
@@ -128,53 +138,44 @@ public class BleCommService
 
         log.finer("RX: " + ProtUtils.hexDumpBuffer(data));
 
-        for(char chr : data)
-        {
-            switch (chr)
-            {
-                // ignore special characters
+        for (char chr : data) {
+            switch (chr) {
                 case 32:
                     break;
 
-                // trigger message handling for new request
                 case '>':
                     //noinspection StringConcatenationInLoop
-                    message += (char) chr;
-                    // trigger message handling
+                    message += chr;
+                    // fall through to trigger message handling
                 case 10:
                 case 13:
-                    try
-                    {
-                        if(!message.isEmpty()) {
+                    try {
+                        if (!message.isEmpty()) {
                             result = elm.handleTelegram(message.toCharArray());
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        log.log(SEVERE,"handleTelegram", ex);
+                    } catch (Exception ex) {
+                        log.log(SEVERE, "handleTelegram", ex);
                     }
                     message = "";
                     break;
 
                 default:
                     //noinspection StringConcatenationInLoop
-                    message += (char) chr;
+                    message += chr;
             }
         }
         return result;
     }
 
     @Override
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
     public void connect(Object device, boolean secure) {
-        mDevice = (BluetoothDevice)device;
-        log.info("BLE connect to " + mDevice.getAddress() + " (" + mDevice.getName() + ")");
+        mDevice = (BluetoothDevice) device;
+        String devName = mDevice.getName();
+        log.info("BLE connect to " + mDevice.getAddress() + " (" + devName + ")");
         setState(STATE.CONNECTING);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            gatt = mDevice.connectGatt(mContext, true, bluetoothGattCallback, BluetoothDevice.TRANSPORT_LE);
-        } else {
-            gatt = mDevice.connectGatt(mContext, true, bluetoothGattCallback);
-        }
+        // autoConnect=false ensures fast direct connection on Android BLE stack
+        gatt = mDevice.connectGatt(mContext, false, bluetoothGattCallback, BluetoothDevice.TRANSPORT_LE);
     }
 
     private final BluetoothGattCallback bluetoothGattCallback = new BluetoothGattCallback() {
@@ -184,78 +185,91 @@ public class BleCommService
         public void onConnectionStateChange(BluetoothGatt gatt,
                                             int status,
                                             int newState) {
-            log.fine(String.format("onConnectionStateChange: %s, %s", status, newState));
-            switch(newState) {
-                case  BluetoothProfile.STATE_CONNECTED:
-                    gatt.discoverServices();
-                    setState(STATE.CONNECTING);
-                    break;
-                case BluetoothProfile.STATE_DISCONNECTED:
+            log.fine(String.format(Locale.US, "onConnectionStateChange: %d, %d", status, newState));
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                gatt.discoverServices();
+                setState(STATE.CONNECTING);
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                try {
                     gatt.close();
+                } catch (Exception ignored) {
+                }
+                if (BleCommService.this.gatt == gatt) {
+                    BleCommService.this.gatt = null;
+                }
+                if (getState() == STATE.CONNECTING) {
+                    connectionFailed();
+                } else if (getState() == STATE.CONNECTED) {
                     connectionLost();
-                    break;
+                }
             }
         }
 
-        @SuppressLint("DefaultLocale")
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            log.fine(String.format("onServicesDiscovered: %d", status));
+            log.fine(String.format(Locale.US, "onServicesDiscovered: %d", status));
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                // reset remembered characteristics
                 rxCharacteristic = txCharacteristic = null;
-                List<BluetoothGattService> services;
-                services = gatt.getServices();
-                // find known serial service
+                List<BluetoothGattService> services = gatt.getServices();
                 for (BluetoothGattService service : services) {
-                    log.fine("GATT SVC:" + service.getUuid().toString());
-                    if(!serialUUIDs.containsKey(service.getUuid()))
+                    log.fine("GATT SVC:" + service.getUuid());
+                    if (!serialUUIDs.containsKey(service.getUuid()))
                         continue;
-                    // found a service, check characteristics ...
                     UUID[] serCharUUIDs = serialUUIDs.get(service.getUuid());
+                    if (serCharUUIDs == null) continue;
                     List<BluetoothGattCharacteristic> characteristics = service.getCharacteristics();
-                    // find corresponding RX & TX characteristics
                     for (BluetoothGattCharacteristic characteristic : characteristics) {
-                        log.fine("GATT CH:" + characteristic.getUuid().toString());
-                        // RX
+                        log.fine("GATT CH:" + characteristic.getUuid());
                         if (characteristic.getUuid().equals(serCharUUIDs[0])) {
-                            log.info("GATT RX:" + characteristic.getUuid().toString());
+                            log.info("GATT RX:" + characteristic.getUuid());
                             rxCharacteristic = characteristic;
-                            // register characteristic for RX notification
                             gatt.setCharacteristicNotification(characteristic, true);
                             BluetoothGattDescriptor desc = characteristic.getDescriptor(LE_CCCD);
-                            if(desc != null) {
-                                desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                                gatt.writeDescriptor(desc);
+                            if (desc != null) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    gatt.writeDescriptor(desc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                } else {
+                                    desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                    gatt.writeDescriptor(desc);
+                                }
                             }
                         }
-                        // TX
-                        if (characteristic.getUuid().equals(serCharUUIDs[1])){
-                            log.info("GATT TX:" + characteristic.getUuid().toString());
-                            // save characteristic for TX
+                        if (characteristic.getUuid().equals(serCharUUIDs[1])) {
+                            log.info("GATT TX:" + characteristic.getUuid());
                             txCharacteristic = characteristic;
                         }
                     }
-                    // RX & TX connected? > connection established
                     if (rxCharacteristic != null && txCharacteristic != null) {
-                        // notify connection established
-                        connectionEstablished(mDevice.getName());
-                        // cancel service loop
+                        String name = mDevice != null ? mDevice.getName() : null;
+                        if (name == null || name.isEmpty()) {
+                            name = mDevice != null ? mDevice.getAddress() : "BLE OBD";
+                        }
+                        connectionEstablished(name);
                         return;
                     }
                 }
-                // nothing matching found > connection failed
+                connectionFailed();
+            } else {
                 connectionFailed();
             }
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            /* Handle incoming characteristic changes
-             * Since only RX characteristic is registered for notification, we handle RX events here */
-            byte[] newValue = characteristic.getValue();
-            handleTelegram(new String(newValue).toCharArray());
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                byte[] newValue = characteristic.getValue();
+                if (newValue != null) {
+                    handleTelegram(new String(newValue, StandardCharsets.UTF_8).toCharArray());
+                }
+            }
+        }
+
+        @Override
+        public void onCharacteristicChanged(@NonNull BluetoothGatt gatt,
+                                            @NonNull BluetoothGattCharacteristic characteristic,
+                                            @NonNull byte[] value) {
+            handleTelegram(new String(value, StandardCharsets.UTF_8).toCharArray());
         }
     };
 }

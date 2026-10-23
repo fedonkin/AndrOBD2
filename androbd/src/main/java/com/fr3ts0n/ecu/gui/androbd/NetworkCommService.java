@@ -26,6 +26,7 @@ import com.fr3ts0n.prot.StreamHandler;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.Locale;
 
 /**
  * Network communication service to allow connection to WIFI OBD adapters
@@ -35,10 +36,10 @@ public class NetworkCommService
 	extends CommService
 	implements Runnable
 {
+	private static final int CONNECT_TIMEOUT_MS = 5000;
 	private Socket mSocket;
 	/** communication stream handler */
 	private final StreamHandler ser = new StreamHandler();
-	private Thread serThread;
 
 	/** default constructor */
 	public NetworkCommService()
@@ -62,10 +63,8 @@ public class NetworkCommService
 	public void start()
 	{
 		log.fine("start");
-		// set up protocol handlers
 		elm.addTelegramWriter(ser);
-		// create communication thread
-		serThread = new Thread(this);
+		Thread serThread = new Thread(this);
 		serThread.start();
 	}
 
@@ -74,10 +73,12 @@ public class NetworkCommService
 	{
 		log.fine("stop");
 		elm.removeTelegramWriter(ser);
-		// close socket
 		try
 		{
-			mSocket.close();
+			if (mSocket != null)
+			{
+				mSocket.close();
+			}
 		} catch (Exception e)
 		{
 			log.severe(e.getMessage());
@@ -88,53 +89,45 @@ public class NetworkCommService
 	@Override
 	public void write(byte[] out)
 	{
-		// forward message to stream handler
 		ser.writeTelegram(new String(out).toCharArray());
 	}
 
 	@Override
 	public void run()
 	{
-		// run communication loop
 		ser.run();
-		// loop was finished -> we have lost connection
 		connectionLost();
 	}
 
 	/**
 	 * Thread for connecting network device
-	 * * required to eliminate android.os.NetworkOnMainThreadException
+	 * required to eliminate android.os.NetworkOnMainThreadException
 	 */
 	class ConnectThread extends Thread
 	{
 		final CommService svc;
 		final String device;
-		int portNum;
+		final int portNum;
 
 		ConnectThread(CommService svc, String device, int portNum)
 		{
 			this.svc = svc;
 			this.device = device;
-			this.portNum  = portNum;
+			this.portNum = portNum;
 		}
 
 		@Override
 		public void run()
 		{
-			log.info(String.format("Connecting to %s port %d", device, portNum));
+			log.info(String.format(Locale.US, "Connecting to %s port %d", device, portNum));
 			setState(STATE.CONNECTING);
 			try
 			{
-				// create socket connection
 				mSocket = new Socket();
 				InetSocketAddress addr = new InetSocketAddress(device, portNum);
-				mSocket.connect(addr);
-				// set streams for stream handler
+				mSocket.connect(addr, CONNECT_TIMEOUT_MS);
 				ser.setStreams(mSocket.getInputStream(), mSocket.getOutputStream());
-				// we are connected -> signal connection established
-				connectionEstablished(device);
-
-				// start communication service thread
+				connectionEstablished(device + ":" + portNum);
 				svc.start();
 			} catch (Exception e)
 			{

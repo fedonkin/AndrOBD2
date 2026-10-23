@@ -400,27 +400,37 @@ public class SettingsActivity extends AppCompatActivity
 		}
 
 		/**
-		 * set up protocol selection
+		 * set up real communication adapter selection (Demo mode is a separate button, not an adapter)
 		 */
 		void setupCommMediaSelection()
 		{
 			ListPreference pref = (ListPreference) findPreference(KEY_COMM_MEDIUM);
 			if (pref == null) return;
-			CommService.MEDIUM[] values = CommService.MEDIUM.values();
-			CharSequence[] titles = new CharSequence[values.length];
-			CharSequence[] keys = new CharSequence[values.length];
-			int i = 0;
-			for (CommService.MEDIUM proto : values)
+
+			// Migrate legacy "0" (DEMO) preference to "1" (BLUETOOTH)
+			CommService.MEDIUM currentMedium = MainActivity.resolveRealMedium(prefs);
+
+			CommService.MEDIUM[] realMedia = new CommService.MEDIUM[] {
+				CommService.MEDIUM.BLUETOOTH,
+				CommService.MEDIUM.BLE,
+				CommService.MEDIUM.USB,
+				CommService.MEDIUM.NETWORK
+			};
+			CharSequence[] titles = new CharSequence[] {
+				getString(R.string.medium_bt),
+				getString(R.string.medium_ble),
+				getString(R.string.medium_usb),
+				getString(R.string.medium_wifi)
+			};
+			CharSequence[] keys = new CharSequence[realMedia.length];
+			for (int i = 0; i < realMedia.length; i++)
 			{
-				titles[i] = proto.toString();
-				keys[i] = String.valueOf(proto.ordinal());
-				i++;
+				keys[i] = String.valueOf(realMedia[i].ordinal());
 			}
-			// set enries and keys
 			pref.setEntries(titles);
 			pref.setEntryValues(keys);
-			pref.setDefaultValue(titles[0]);
-			// show current selection
+			pref.setDefaultValue(String.valueOf(CommService.MEDIUM.BLUETOOTH.ordinal()));
+			pref.setValue(String.valueOf(currentMedium.ordinal()));
 			pref.setSummary(pref.getEntry());
 		}
 

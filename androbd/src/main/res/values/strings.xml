@@ -375,4 +375,63 @@ period of time while the ECU recalibrates itself.
         <item>fr</item>
         <item>es</item>
     </string-array>
+
+    <!-- Modern connection & UI strings -->
+    <string name="connect_real_adapter">Connect to adapter</string>
+    <string name="start_demo_mode">Demo mode</string>
+    <string name="stop_demo_mode">Exit demo</string>
+    <string name="open_live_data">Open live data</string>
+    <string name="status_offline">Disconnected</string>
+    <string name="status_online">Connected</string>
+    <string name="status_demo">Demo mode</string>
+    <string name="status_file">Saved file</string>
+    <string name="connection_type_label">Connection method</string>
+    <string name="medium_bt">Bluetooth</string>
+    <string name="medium_ble">BLE 4.0</string>
+    <string name="medium_wifi">Wi-Fi</string>
+    <string name="medium_usb">USB</string>
+    <string name="medium_hint_bt">Classic Bluetooth ELM327 adapter (SPP)</string>
+    <string name="medium_hint_ble">Bluetooth Low Energy 4.0+ adapter</string>
+    <string name="medium_hint_wifi">Wi-Fi ELM327 adapter over TCP/IP</string>
+    <string name="medium_hint_usb">Wired USB-Serial OTG adapter</string>
+    <string name="home_subtitle">OBD-II vehicle diagnostics</string>
+    <string name="section_diagnostics">Diagnostics &amp; Data</string>
+    <string name="card_live_data_title">Live Data</string>
+    <string name="card_live_data_sub">Real-time sensors</string>
+    <string name="card_codes_title">Fault Codes</string>
+    <string name="card_codes_sub">Read &amp; clear DTC</string>
+    <string name="card_veh_title">Vehicle Info</string>
+    <string name="card_veh_sub">VIN &amp; ECU IDs</string>
+    <string name="card_load_title">Saved Logs</string>
+    <string name="card_load_sub">Open saved session</string>
+    <string name="connect_first_hint">Connect to an adapter or start Demo mode first</string>
+    <string name="tab_data">Data</string>
+    <string name="tab_codes">Faults</string>
+    <string name="tab_vehicle">Vehicle</string>
+    <string name="tab_freezeframe">Freeze</string>
+    <string name="search_params_hint">Search parameters…</string>
+    <string name="clear_search">Clear search</string>
+    <string name="params_count_fmt">%d items</string>
+    <string name="mil_ok">MIL OK</string>
+    <string name="mil_active_fmt">CHECK (%d)</string>
+    <string name="empty_waiting_data">Waiting for ECU data…</string>
+    <string name="empty_no_codes">No fault codes stored in ECU</string>
+    <string name="empty_no_search_match">No matching parameters</string>
+    <string name="bt_not_supported">Bluetooth is not supported on this device</string>
+    <string name="bt_permission_required">Bluetooth permission is required to connect to the adapter</string>
+    <string name="wifi_connect_title">Wi-Fi Adapter Connection</string>
+    <string name="wifi_connect_action">Connect</string>
+    <string name="rescan_devices">Scan</string>
+    <string name="device_paired">Paired</string>
+    <string name="device_nearby">Nearby</string>
+    <string name="device_obd_paired">OBD · Paired</string>
+    <string name="device_obd_nearby">OBD · Nearby</string>
+    <string name="select_adapter_subtitle">Tap your ELM327 / OBD-II adapter to connect</string>
+    <string name="dtc_status_confirmed">Confirmed</string>
+    <string name="dtc_status_pending">Pending</string>
+    <string name="dtc_status_permanent">Permanent</string>
+    <string name="no_numeric_items_yet">Wait until numeric parameters are received</string>
+    <string name="back_action">Back</string>
+    <string name="home_action">Home</string>
+    <string name="hud_short" translatable="false">HUD</string>
 </resources>

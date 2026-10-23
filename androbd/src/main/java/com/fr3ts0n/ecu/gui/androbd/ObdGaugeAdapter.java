@@ -25,20 +25,18 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.github.anastr.speedviewlib.AwesomeSpeedometer;
 
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Adapter for OBD data gauge display
- *
- * @author erwin
+ * Adapter for OBD data gauge display in clean modern card containers.
  */
 class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHolder>
 {
@@ -47,10 +45,6 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 	private final List<EcuDataPv> items = new ArrayList<>();
 	private OnItemLongClickListener longClickListener;
 
-	/** format for numeric labels */
-	private static final NumberFormat labelFormat = new DecimalFormat("0;-#");
-
-	/** Callback for a long-press on a gauge item. */
 	interface OnItemLongClickListener
 	{
 		boolean onItemLongClick(int position);
@@ -58,8 +52,8 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 
 	static class GaugeViewHolder extends RecyclerView.ViewHolder
 	{
-		AwesomeSpeedometer gauge;
-		TextView tvDescr;
+		final AwesomeSpeedometer gauge;
+		final TextView tvDescr;
 
 		GaugeViewHolder(View itemView)
 		{
@@ -75,32 +69,27 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		this.resourceId = resource;
 	}
 
-	/** Sets the listener invoked on a long-press of a gauge item. */
 	void setOnItemLongClickListener(OnItemLongClickListener listener)
 	{
 		longClickListener = listener;
 	}
 
-	/** Returns the item at {@code position}, or {@code null} if out of range. */
 	EcuDataPv getItem(int position)
 	{
 		return (position >= 0 && position < items.size()) ? items.get(position) : null;
 	}
 
-	/** Returns the position of {@code pv} in the current item list, or -1 if not present. */
 	int getPosition(EcuDataPv pv)
 	{
 		return items.indexOf(pv);
 	}
 
-	/** Appends {@code pv} to the item list and notifies the RecyclerView. */
 	void add(EcuDataPv pv)
 	{
 		items.add(pv);
 		notifyItemInserted(items.size() - 1);
 	}
 
-	/** Removes all items and notifies the RecyclerView. */
 	void clear()
 	{
 		int size = items.size();
@@ -129,31 +118,50 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		if (currPv == null) return;
 
 		holder.itemView.setOnLongClickListener(v ->
-			longClickListener != null
-				&& longClickListener.onItemLongClick(holder.getBindingAdapterPosition()));
+				longClickListener != null
+						&& longClickListener.onItemLongClick(holder.getBindingAdapterPosition()));
 
-		// Get display color ...
 		int pidColor = ColorAdapter.getItemColor(currPv);
-
-		// Taint background with PID color
-		holder.itemView.setBackgroundColor(pidColor & 0x10FFFFFF);
-		// set new values for display
 		holder.tvDescr.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
 
 		Number minValue = (Number) currPv.get(EcuDataPv.FID_MIN);
 		Number maxValue = (Number) currPv.get(EcuDataPv.FID_MAX);
-		Number value =    (Number) currPv.get(EcuDataPv.FID_VALUE);
-		String format = (String) currPv.get(EcuDataPv.FID_FORMAT);
+		Number value = (Number) currPv.get(EcuDataPv.FID_VALUE);
+		final String format = (String) currPv.get(EcuDataPv.FID_FORMAT);
 
 		if (minValue == null) minValue = 0f;
-		if (maxValue == null) maxValue = 255f;
+		if (maxValue == null || maxValue.floatValue() <= minValue.floatValue())
+		{
+			maxValue = minValue.floatValue() + 100f;
+		}
+		if (value == null) value = minValue;
 
-		// Tick triangles show in PID color
 		holder.gauge.setTrianglesColor(pidColor);
-		holder.gauge.setBackgroundCircleColor(pidColor & 0x20FFFFFF);
-		// Use PID specific units and value format
-		holder.gauge.setUnit(currPv.getUnits());
-		holder.gauge.setSpeedTextListener(aFloat -> String.format(format, aFloat));
+		holder.gauge.setSpeedometerColor(pidColor);
+		holder.gauge.setIndicatorColor(pidColor);
+		holder.gauge.setBackgroundCircleColor(
+				ContextCompat.getColor(context, R.color.bg_surface_elevated));
+		holder.gauge.setSpeedTextColor(
+				ContextCompat.getColor(context, R.color.text_primary));
+		holder.gauge.setTextColor(
+				ContextCompat.getColor(context, R.color.text_secondary));
+		holder.gauge.setUnitTextColor(
+				ContextCompat.getColor(context, R.color.text_secondary));
+
+		String units = currPv.getUnits();
+		holder.gauge.setUnit(units != null ? units : "");
+		holder.gauge.setSpeedTextListener(aFloat -> {
+			if (format != null && !format.isEmpty())
+			{
+				try
+				{
+					return String.format(Locale.getDefault(), format, aFloat);
+				} catch (Exception ignored)
+				{
+				}
+			}
+			return String.format(Locale.getDefault(), "%.1f", aFloat);
+		});
 
 		holder.gauge.setMinSpeed(minValue.floatValue());
 		holder.gauge.setMaxSpeed(maxValue.floatValue());

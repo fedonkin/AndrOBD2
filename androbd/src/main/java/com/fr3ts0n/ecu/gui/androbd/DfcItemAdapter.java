@@ -19,10 +19,14 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.content.Context;
+import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
@@ -30,12 +34,9 @@ import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
 
 import java.util.Collection;
-import java.util.Objects;
 
 /**
- * Adapter to display OBD DFCs
- *
- * @author erwin
+ * Adapter to display OBD Diagnostic Fault Codes (DTC/DFC) in modern card layout.
  */
 public class DfcItemAdapter extends ObdItemAdapter
 {
@@ -50,13 +51,9 @@ public class DfcItemAdapter extends ObdItemAdapter
 		return pvs.values();
 	}
 
-	/* (non-Javadoc)
-	 * @see com.fr3ts0n.ecu.gui.androbd.ObdItemAdapter#getView(int, android.view.View, android.view.ViewGroup)
-	 */
 	@Override
 	public View getView(int position, View v, ViewGroup parent)
 	{
-		// get data PV
 		IndexedProcessVar currPv = (IndexedProcessVar) getItem(position);
 
 		if (v == null)
@@ -64,40 +61,67 @@ public class DfcItemAdapter extends ObdItemAdapter
 			v = mInflater.inflate(R.layout.obd_item, parent, false);
 		}
 
-		// Show icon
+		if (currPv == null)
+		{
+			return v;
+		}
+
+		View itemAccent = v.findViewById(R.id.item_accent);
 		ImageView ivIcon = v.findViewById(R.id.obd_icon);
+		TextView tvDescr = v.findViewById(R.id.obd_label);
+		TextView tvSublabel = v.findViewById(R.id.obd_sublabel);
+		TextView tvValue = v.findViewById(R.id.obd_value);
+		TextView tvUnits = v.findViewById(R.id.obd_units);
+		ProgressBar bar = v.findViewById(R.id.bar);
+
+		if (bar != null) bar.setVisibility(View.GONE);
+
+		int accentColor = ContextCompat.getColor(getContext(), R.color.status_danger);
+		int statusRes = R.string.dtc_status_confirmed;
 		ivIcon.setImageResource(R.drawable.ic_code);
+
 		try
 		{
-			// Show icon based on code status (pending/permanent/normal)
-			Integer svc = (Integer)currPv.get(EcuCodeItem.FID_STATUS);
-			switch(svc)
+			Integer svc = (Integer) currPv.get(EcuCodeItem.FID_STATUS);
+			if (svc != null)
 			{
-				case ObdProt.OBD_SVC_PENDINGCODES:
+				if (svc == ObdProt.OBD_SVC_PENDINGCODES)
+				{
 					ivIcon.setImageResource(R.drawable.ic_history);
-					break;
-
-				case ObdProt.OBD_SVC_PERMACODES:
+					accentColor = ContextCompat.getColor(getContext(), R.color.status_demo);
+					statusRes = R.string.dtc_status_pending;
+				} else if (svc == ObdProt.OBD_SVC_PERMACODES)
+				{
 					ivIcon.setImageResource(android.R.drawable.ic_dialog_alert);
-					break;
+					statusRes = R.string.dtc_status_permanent;
+				}
 			}
+		} catch (Exception ignored)
+		{
 		}
-		catch(Exception ex) { /* ignore */ }
 
+		tintViewBackground(itemAccent, accentColor);
+		ivIcon.setColorFilter(accentColor);
 		ivIcon.setVisibility(View.VISIBLE);
 
-		TextView tvDescr = v.findViewById(R.id.obd_label);
-		TextView tvValue = v.findViewById(R.id.obd_units);
-
-		tvValue.setText(String.valueOf(Objects.requireNonNull(currPv).get(EcuCodeItem.FID_CODE)));
 		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
+		if (tvSublabel != null)
+		{
+			tvSublabel.setText(R.string.long_press_dfc_hint);
+			tvSublabel.setVisibility(View.VISIBLE);
+		}
+
+		tvValue.setVisibility(View.VISIBLE);
+		tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+		tvValue.setTextColor(accentColor);
+		tvValue.setText(String.valueOf(currPv.get(EcuCodeItem.FID_CODE)));
+
+		tvUnits.setVisibility(View.VISIBLE);
+		tvUnits.setText(statusRes);
 
 		return v;
 	}
 
-	/* (non-Javadoc)
-	 * @see com.fr3ts0n.ecu.gui.androbd.ObdItemAdapter#getView(int, android.view.View, android.view.ViewGroup)
-	 */
 	@Override
 	public View getDropDownView(int position, View v, ViewGroup parent)
 	{

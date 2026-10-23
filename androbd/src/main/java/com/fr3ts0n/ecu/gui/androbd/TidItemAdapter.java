@@ -22,7 +22,10 @@ import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.pvs.PvList;
@@ -31,8 +34,6 @@ import java.util.Collection;
 
 /**
  * Adapter to display OBD TID items from a process variable list
- *
- * @author erwin
  */
 public class TidItemAdapter extends ObdItemAdapter
 {
@@ -50,7 +51,6 @@ public class TidItemAdapter extends ObdItemAdapter
     @Override
     public View getView(int position, View convertView, ViewGroup parent)
     {
-        // get data PV
         EcuDataPv currPv = (EcuDataPv) getItem(position);
 
         if (convertView == null)
@@ -58,17 +58,32 @@ public class TidItemAdapter extends ObdItemAdapter
             convertView = mInflater.inflate(R.layout.obd_item, parent, false);
         }
 
-        // Show icon
+        if (currPv == null)
+        {
+            return convertView;
+        }
+
+        View itemAccent = convertView.findViewById(R.id.item_accent);
+        tintViewBackground(itemAccent, ContextCompat.getColor(getContext(), R.color.accent_primary));
+
         ImageView ivIcon = convertView.findViewById(R.id.obd_icon);
+        ivIcon.setImageResource(R.drawable.ic_slideshow);
         ivIcon.setVisibility(View.VISIBLE);
 
-        // Hide value
+        TextView tvLabel = convertView.findViewById(R.id.obd_label);
+        tvLabel.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
+
+        TextView tvSublabel = convertView.findViewById(R.id.obd_sublabel);
+        if (tvSublabel != null) tvSublabel.setVisibility(View.GONE);
+
         TextView tvValue = convertView.findViewById(R.id.obd_value);
         tvValue.setVisibility(View.GONE);
 
-        // set description
         TextView tvUnits = convertView.findViewById(R.id.obd_units);
-        tvUnits.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
+        tvUnits.setVisibility(View.GONE);
+
+        ProgressBar bar = convertView.findViewById(R.id.bar);
+        if (bar != null) bar.setVisibility(View.GONE);
 
         return convertView;
     }

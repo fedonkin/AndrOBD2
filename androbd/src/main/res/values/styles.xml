@@ -1,6 +1,13 @@
 <resources>
-    <!-- Application theme. -->
-    <style name="AppTheme" parent="Theme.Material3.DayNight" >
+    <!-- Application theme -->
+    <style name="AppTheme" parent="Theme.Material3.DayNight">
+        <item name="colorPrimary">@color/accent_primary</item>
+        <item name="colorOnPrimary">@color/accent_on_primary</item>
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:windowBackground">@color/bg_screen</item>
+        <item name="android:statusBarColor">@color/bg_surface</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="android:activatedBackgroundIndicator">@drawable/activated_background</item>
         <item name="android:fitsSystemWindows">true</item>
     </style>

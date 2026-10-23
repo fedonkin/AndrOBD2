@@ -153,11 +153,15 @@ public class DashBoardActivity extends AppCompatActivity
 
 		int height = metrics.heightPixels;
 		int width = metrics.widthPixels;
+		if (positions == null || positions.length == 0 || mAdapter == null)
+		{
+			return;
+		}
 		int numColumns = Math.max(1, Math.min(positions.length, width / MIN_GAUGE_SIZE));
 		int numRows = Math.max(1, Math.min(positions.length, height / MIN_GAUGE_SIZE));
 
 		// distribute gauges on screen
-		if(positions.length < numColumns*numRows)
+		if(positions.length < rowCols.length && positions.length < numColumns*numRows)
 		{
 			// read for corresponding number of gauges & orientation
 			numColumns = rowCols[positions.length][(width>height)?0:1];
@@ -209,6 +213,11 @@ public class DashBoardActivity extends AppCompatActivity
 		// set the desired content screen
 		int resId = getIntent().getIntExtra(RES_ID, R.layout.dashboard);
 		setContentView(resId);
+		View btnBack = findViewById(R.id.btn_dashboard_back);
+		if (btnBack != null)
+		{
+			btnBack.setOnClickListener(v -> finish());
+		}
 		grid = findViewById(R.id.dashboardGrid);
 		gridLayoutManager = new GridLayoutManager(this, 1);
 		grid.setLayoutManager(gridLayoutManager);
@@ -220,6 +229,10 @@ public class DashBoardActivity extends AppCompatActivity
 
 		/* get PIDs to be shown */
 		positions = getIntent().getIntArrayExtra(POSITIONS);
+		if (positions == null)
+		{
+			positions = new int[0];
+		}
 	}
 
 	/**
