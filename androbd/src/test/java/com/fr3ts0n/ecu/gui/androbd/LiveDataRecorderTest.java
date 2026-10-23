@@ -127,4 +127,39 @@ public class LiveDataRecorderTest
         String sample = "# Header\nВремя;Сек;RPM\n12:00:00;0;800\n";
         assertEquals(sample, MainActivity.prepareClipboardPayload(sample, "/tmp/test.csv"));
     }
+
+    @Test
+    public void recordsEventMarkersIntoDedicatedColumn()
+    {
+        final List<EcuDataPv> liveItems = new ArrayList<>();
+        EcuDataPv rpm = makePv(0x0C, "RPM", "Обороты", 900, "rpm");
+        liveItems.add(rpm);
+
+        LiveDataRecorder recorder = new LiveDataRecorder(new LiveDataRecorder.DataSource()
+        {
+            @Override
+            public Collection<?> getPidItems() { return liveItems; }
+            @Override
+            public Collection<?> getPluginItems() { return Collections.emptyList(); }
+        });
+
+        long t0 = 50_000L;
+        recorder.startForTest(t0);
+        assertTrue(recorder.captureSnapshotAt(t0));
+
+        assertEquals("MARK_1", recorder.addMarkerAt(t0 + 500L));
+        rpm.put(EcuDataPv.FID_VALUE, 2400);
+        assertTrue(recorder.captureSnapshotAt(t0 + 1000L));
+
+        assertEquals("MARK_2", recorder.addMarkerAt(t0 + 1500L));
+        recorder.stopForTest(t0 + 1600L);
+
+        assertEquals(2, recorder.getMarkerCount());
+        String log = recorder.buildFormattedLog("Время", "Сек", "Метка");
+        String[] lines = log.split("\n");
+        assertTrue(lines[0].contains("2 marks"));
+        assertEquals("Время;Сек;Метка;Обороты [rpm]", lines[1]);
+        assertTrue(lines[2].endsWith(";0;MARK_1;900"));
+        assertTrue(lines[3].endsWith(";1;MARK_2;2400"));
+    }
 }

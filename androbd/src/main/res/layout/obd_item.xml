@@ -86,6 +86,16 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
+
+        <ImageView
+            android:id="@+id/iv_fav_star"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/fav_toggle_desc"
+            android:padding="5dp"
+            android:src="@drawable/ic_star_outline"
+            android:visibility="gone" />
     </LinearLayout>
 
     <ProgressBar

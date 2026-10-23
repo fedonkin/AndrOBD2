@@ -19,373 +19,467 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.annotation.SuppressLint;
-import android.graphics.Color;
-import android.graphics.Paint.Align;
+import android.graphics.PorterDuff;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.WindowManager;
-import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ListAdapter;
+import android.widget.TextView;
 
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 
-import org.achartengine.ChartFactory;
-import org.achartengine.GraphicalView;
 import org.achartengine.model.XYMultipleSeriesDataset;
 import org.achartengine.model.XYSeries;
-import org.achartengine.renderer.BasicStroke;
-import org.achartengine.renderer.XYMultipleSeriesRenderer;
-import org.achartengine.renderer.XYSeriesRenderer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.TreeSet;
 
 /**
- * <code>Activity</code> that displays the readout of one <code>Sensor</code>.
- * This <code>Activity</code> must be started with an <code>Intent</code> that
- * passes in the number of the <code>Sensor</code>(s) to display. If none is
- * passed, the first available <code>Sensor</code> is used.
+ * Interactive multi-channel Live Data chart activity with selectable time windows
+ * (30s / 2m / 5m / All), pause/freeze mode, touch crosshair readout, and live legend cards.
  */
 public class ChartActivity extends AppCompatActivity
 {
+    public static final String POSITIONS = "POSITIONS";
+    public static final String LIVE_UPDATE = "LIVE_UPDATE";
 
-	/**
-	 * For passing the index number of the <code>Sensor</code> in its
-	 * <code>SensorManager</code>
-	 */
-	public static final String POSITIONS = "POSITIONS";
+    private static final long WIN_30S = 30_000L;
+    private static final long WIN_2M = 120_000L;
+    private static final long WIN_5M = 300_000L;
+    private static final long WIN_ALL = 0L;
 
-	/**
-	 * For passing if to do live data updates
-	 */
-	public static final String LIVE_UPDATE = "LIVE_UPDATE";
+    private final TreeSet<Integer> pidNumbers = new TreeSet<>();
+    private final List<ModernChartView.SeriesEntry> seriesEntries = new ArrayList<>();
+    private final List<TextView> legendValueViews = new ArrayList<>();
+    private final List<View> legendCardViews = new ArrayList<>();
 
-    /** Map to uniquely collect PID numbers */
-	private final TreeSet<Integer> pidNumbers = new TreeSet<>();
+    private ModernChartView chartView;
+    private XYMultipleSeriesDataset sensorData;
+    private AutoHider toolBarHider;
+    private WakeLock wakeLock;
+    private boolean doLiveUpdates = false;
+    private Timer refreshTimer;
 
-	/**
-	 * list of colors to be used for series
-	 */
-	private static final BasicStroke[] stroke =
-		{
-			BasicStroke.SOLID,
-			BasicStroke.DASHED,
-			BasicStroke.DOTTED,
-		};
+    private static ListAdapter mAdapter = null;
 
-	/**
-	 * The displaying component
-	 */
-	private GraphicalView chartView;
+    public static ListAdapter getAdapter()
+    {
+        return mAdapter;
+    }
 
-	/**
-	 * Dataset of the graphing component
-	 */
-	private XYMultipleSeriesDataset sensorData;
+    public static void setAdapter(ListAdapter adapter)
+    {
+        ChartActivity.mAdapter = adapter;
+    }
 
-	/**
-	 * Renderer for actually drawing the graph
-	 */
-	private XYMultipleSeriesRenderer renderer;
-	/** automatic hiding toolbar */
-	private AutoHider toolBarHider;
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu)
+    {
+        getMenuInflater().inflate(R.menu.chart, menu);
+        return true;
+    }
 
-	/**
-	 * the wake lock to keep app communication alive
-	 */
-	private WakeLock wakeLock;
+    @SuppressLint({"WakelockTimeout", "ClickableViewAccessibility"})
+    @Override
+    public void onCreate(Bundle savedInstanceState)
+    {
+        SettingsActivity.applyLocale(this);
+        super.onCreate(savedInstanceState);
 
-	/** do live updates? */
-	private boolean doLiveUpdates = false;
+        if (MainActivity.prefs != null && MainActivity.prefs.getBoolean(MainActivity.PREF_FULLSCREEN, false))
+        {
+            getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        }
 
-	private static ListAdapter mAdapter = null;
+        if (MainActivity.prefs != null && MainActivity.prefs.getBoolean("keep_screen_on", false))
+        {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
 
-	/** data adapter as source of display data */
-	public static ListAdapter getAdapter()
-	{
-		return mAdapter;
-	}
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = Objects.requireNonNull(powerManager).newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                getPackageName() + ":ChartWakeLock");
+        wakeLock.acquire();
 
-	public static void setAdapter(ListAdapter mAdapter)
-	{
-		ChartActivity.mAdapter = mAdapter;
-	}
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null)
+        {
+            actionBar.hide();
+        }
 
-	/**
-	 * get stroke for an ID number preferrably unique pid number
-	 * this is to get persistent coloring/lining for each id
-	 * @param id id to get color for
-	 * @return color for given ID
-	 */
-	private static BasicStroke getStroke(int id)
-	{
-		return stroke[(id / ColorAdapter.colors.length) % stroke.length];
-	}
+        setTitle(R.string.chart);
+        setContentView(R.layout.chart_activity);
 
-	@Override
-	public boolean onCreateOptionsMenu(Menu menu)
-	{
-		getMenuInflater().inflate(R.menu.chart, menu);
-		return true;
-	}
+        doLiveUpdates = getIntent().getBooleanExtra(LIVE_UPDATE, false);
+        int[] positions = getIntent().getIntArrayExtra(POSITIONS);
+        if (positions == null) positions = new int[0];
 
-	@Override
-	public void onCreate(Bundle savedInstanceState)
-	{
-		// Apply locale before anything else
-		SettingsActivity.applyLocale(this);
+        sensorData = new XYMultipleSeriesDataset();
+        chartView = findViewById(R.id.modern_chart_view);
 
-		super.onCreate(savedInstanceState);
-		getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-		                     WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        setUpChartData(positions);
+        bindChartControls();
+        updateWindowSelectionUi(WIN_2M);
 
-		// keep main display on?
-		if(MainActivity.prefs.getBoolean("keep_screen_on", false))
-		{
-			getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-		}
+        if (!pidNumbers.isEmpty())
+        {
+            ObdProt.resetFixedPid();
+            MainActivity.setFixedPids(pidNumbers);
+        }
 
-		// prevent activity from falling asleep
-		PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-		wakeLock = Objects.requireNonNull(powerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-			getString(R.string.app_name));
-		wakeLock.acquire();
+        if (MainActivity.prefs != null && MainActivity.prefs.getBoolean(MainActivity.PREF_AUTOHIDE, false))
+        {
+            int timeout = Integer.parseInt(
+                    MainActivity.prefs.getString(MainActivity.PREF_AUTOHIDE_DELAY, "15"));
+            toolBarHider = new AutoHider(this, mHandler, timeout * 1000L);
+            toolBarHider.start(1000);
+        }
+    }
 
-		// set up action bar
-		ActionBar actionBar = getSupportActionBar();
-		if (actionBar != null)
-		{
-			actionBar.setDisplayShowTitleEnabled(true);
-		}
+    private void bindChartControls()
+    {
+        View btnBack = findViewById(R.id.btn_chart_back);
+        if (btnBack != null)
+        {
+            btnBack.setOnClickListener(v -> finish());
+        }
 
-		setTitle(R.string.chart);
+        View chip30s = findViewById(R.id.chip_win_30s);
+        View chip2m = findViewById(R.id.chip_win_2m);
+        View chip5m = findViewById(R.id.chip_win_5m);
+        View chipAll = findViewById(R.id.chip_win_all);
 
-		/*
-		 * get intent parameters
-		 */
-		doLiveUpdates = getIntent().getBooleanExtra(LIVE_UPDATE,false);
-		/* get PIDs to be shown */
-		int[] positions = getIntent().getIntArrayExtra(POSITIONS);
+        if (chip30s != null) chip30s.setOnClickListener(v -> selectTimeWindow(WIN_30S));
+        if (chip2m != null) chip2m.setOnClickListener(v -> selectTimeWindow(WIN_2M));
+        if (chip5m != null) chip5m.setOnClickListener(v -> selectTimeWindow(WIN_5M));
+        if (chipAll != null) chipAll.setOnClickListener(v -> selectTimeWindow(WIN_ALL));
 
-		// set up overall chart properties
-		sensorData = new XYMultipleSeriesDataset();
-		renderer = new XYMultipleSeriesRenderer(positions.length);
-		chartView = ChartFactory.getTimeChartView(this, sensorData, renderer, "H:mm:ss");
-		// set up global renderer
-		float textSize = new EditText(this).getTextSize();
-		renderer.setLabelsTextSize(textSize/2);
-		renderer.setXTitle(getString(R.string.time));
-		renderer.setXLabels(5);
-		renderer.setYLabels(5);
-		renderer.setGridColor(Color.DKGRAY);
-		renderer.setShowGrid(true);
-		renderer.setFitLegend(true);
-		renderer.setClickEnabled(false);
-		// set up chart data
-		setUpChartData(positions);
-		// make chart visible
-		setContentView(chartView);
-		// limit selected PIDs to selection
-		MainActivity.setFixedPids(pidNumbers);
-		// if auto hiding selected ...
-		if(MainActivity.prefs.getBoolean(MainActivity.PREF_AUTOHIDE,false))
-		{
-			// get autohide timeout [s]
-			int timeout = Integer.parseInt(
-				MainActivity.prefs.getString(MainActivity.PREF_AUTOHIDE_DELAY,"15") );
-			// auto hide toolbar
-			toolBarHider = new AutoHider( this,
-			                              mHandler,
-			                              timeout * 1000L);
-			toolBarHider.start(1000);
-			// wake up on touch
-			chartView.setOnTouchListener(toolBarHider);
-		}
-	}
+        View btnPause = findViewById(R.id.btn_chart_pause);
+        if (btnPause != null)
+        {
+            btnPause.setOnClickListener(v -> togglePause());
+        }
 
-	/**
-	 * Handle message requests
-	 */
-	@SuppressLint("HandlerLeak")
-    private transient final Handler mHandler = new Handler()
-	{
-		@Override
-		public void handleMessage(Message msg)
-		{
+        View btnShare = findViewById(R.id.btn_chart_share);
+        if (btnShare != null)
+        {
+            btnShare.setOnClickListener(v -> new ExportTask(this).execute(sensorData));
+        }
+    }
 
-			if (msg.what == MainActivity.MESSAGE_UPDATE_VIEW) {
-				// Carry-forward: if a series hasn't received a new value for more than
-				// 1.5 s, add a duplicate point at the current time so the flat line
-				// extends to the right rather than being absent (issue #180).
-				long now = System.currentTimeMillis();
-				for (org.achartengine.model.XYSeries series : sensorData.getSeries())
-				{
-					int count = series.getItemCount();
-					if (count > 0 && now - (long) series.getX(count - 1) > 1500)
-					{
-						series.add(now, series.getY(count - 1));
-					}
-				}
-				/* update chart */
-				chartView.invalidate();
-			} else if (msg.what == MainActivity.MESSAGE_TOOLBAR_VISIBLE) {
-				Boolean visible = (Boolean) msg.obj;
-				// set action bar visibility
-				ActionBar ab = getSupportActionBar();
-				if (ab != null) {
-					if (visible) {
-						ab.show();
-					} else {
-						ab.hide();
-					}
-				}
-			}
-		}
-	};
+    private void selectTimeWindow(long windowMs)
+    {
+        if (chartView != null)
+        {
+            chartView.setTimeWindowMs(windowMs);
+        }
+        updateWindowSelectionUi(windowMs);
+    }
 
-	/**
-	 * Handle menu selections
-	 *
-	 * @param item selected menu item
-	 * @return result of super call
-	 */
-	@Override
-	public boolean onOptionsItemSelected(MenuItem item)
-	{
-		int itemId = item.getItemId();
-		if (itemId == R.id.share) {
-			new ExportTask(this).execute(sensorData);
-		}
-		return super.onOptionsItemSelected(item);
-	}
+    private void updateWindowSelectionUi(long activeWin)
+    {
+        View chip30s = findViewById(R.id.chip_win_30s);
+        View chip2m = findViewById(R.id.chip_win_2m);
+        View chip5m = findViewById(R.id.chip_win_5m);
+        View chipAll = findViewById(R.id.chip_win_all);
 
-	/**
-	 * Handle destroy of the Activity
-	 */
-	@Override
-	protected void onDestroy()
-	{
-		if(toolBarHider != null)
-		{
-			// cancel hiding thread
-			toolBarHider.cancel();
-			// forget about it
-			toolBarHider = null;
-		}
-		ObdProt.resetFixedPid();
-		// allow sleeping again
-		wakeLock.release();
-		super.onDestroy();
-	}
+        if (chip30s != null) chip30s.setSelected(activeWin == WIN_30S);
+        if (chip2m != null) chip2m.setSelected(activeWin == WIN_2M);
+        if (chip5m != null) chip5m.setSelected(activeWin == WIN_5M);
+        if (chipAll != null) chipAll.setSelected(activeWin == WIN_ALL);
+    }
 
-	private final Timer refreshTimer = new Timer();
+    private void togglePause()
+    {
+        if (chartView == null) return;
+        boolean nextPaused = !chartView.isPaused();
+        chartView.setPaused(nextPaused);
 
-	/**
-	 * Timer Task to cyclically update data screen
-	 */
-	private final TimerTask updateTask = new TimerTask()
-	{
-		@Override
-		public void run()
-		{
-			/* forward message to update the view */
-			Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_UPDATE_VIEW);
-			mHandler.sendMessage(msg);
-		}
-	};
+        View btnPause = findViewById(R.id.btn_chart_pause);
+        ImageView ivPause = findViewById(R.id.iv_chart_pause);
+        TextView tvPause = findViewById(R.id.tv_chart_pause);
 
+        if (btnPause != null && ivPause != null && tvPause != null)
+        {
+            if (nextPaused)
+            {
+                btnPause.setBackgroundResource(R.drawable.bg_badge_demo);
+                ivPause.setImageResource(R.drawable.ic_play_demo);
+                ivPause.setColorFilter(ContextCompat.getColor(this, R.color.status_demo));
+                tvPause.setTextColor(ContextCompat.getColor(this, R.color.status_demo));
+                tvPause.setText(R.string.chart_resume);
+            } else
+            {
+                btnPause.setBackgroundResource(R.drawable.bg_btn_secondary);
+                ivPause.setImageResource(R.drawable.ic_pause);
+                ivPause.setColorFilter(ContextCompat.getColor(this, R.color.text_primary));
+                tvPause.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+                tvPause.setText(R.string.chart_pause);
+            }
+        }
+    }
 
-	/* (non-Javadoc)
-	 * @see android.app.Activity#onStart()
-	 */
-	@Override
-	protected void onStart()
-	{
-		super.onStart();
-		// start display update task
-		try
-		{
-			if(doLiveUpdates) {
-				refreshTimer.schedule(updateTask, 0, 1000);
-			}
-		} catch (Exception e)
-		{
-			// exception ignored here ...
-		}
-	}
+    private final Handler mHandler = new Handler(Looper.getMainLooper())
+    {
+        @Override
+        public void handleMessage(Message msg)
+        {
+            if (msg.what == MainActivity.MESSAGE_UPDATE_VIEW)
+            {
+                if (chartView != null && !chartView.isPaused())
+                {
+                    long now = System.currentTimeMillis();
+                    for (XYSeries series : sensorData.getSeries())
+                    {
+                        synchronized (series)
+                        {
+                            int count = series.getItemCount();
+                            if (count > 0 && now - (long) series.getX(count - 1) > 1500)
+                            {
+                                series.add(now, series.getY(count - 1));
+                            }
+                        }
+                    }
+                    chartView.invalidate();
+                }
+                refreshLegendValues();
+            }
+        }
+    };
 
-	/* (non-Javadoc)
-	 * @see android.app.Activity#onStop()
-	 */
-	@Override
-	protected void onStop()
-	{
-		refreshTimer.purge();
-		super.onStop();
-	}
+    private void refreshLegendValues()
+    {
+        for (int i = 0; i < seriesEntries.size() && i < legendValueViews.size(); i++)
+        {
+            ModernChartView.SeriesEntry entry = seriesEntries.get(i);
+            TextView tvVal = legendValueViews.get(i);
+            double latest = Double.NaN;
+            synchronized (entry.series)
+            {
+                int cnt = entry.series.getItemCount();
+                if (cnt > 0)
+                {
+                    latest = entry.series.getY(cnt - 1);
+                }
+            }
+            String formatted = ModernChartView.formatCompactNumber(latest);
+            if (!entry.units.isEmpty())
+            {
+                formatted = formatted + " " + entry.units;
+            }
+            tvVal.setText(formatted);
+        }
+    }
 
-	/**
-	 * Set up all the charting data series
-	 *
-	 * @param positions Positions of PIDs withn adapter
-	 */
-	private void setUpChartData(int[] positions)
-	{
-		long startTime = System.currentTimeMillis();
-		int i = 0;
-		EcuDataPv currPv;
-		XYSeries currSeries;
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item)
+    {
+        if (item.getItemId() == R.id.share)
+        {
+            new ExportTask(this).execute(sensorData);
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
 
-		pidNumbers.clear();
+    @Override
+    protected void onStart()
+    {
+        super.onStart();
+        if (doLiveUpdates)
+        {
+            refreshTimer = new Timer();
+            refreshTimer.schedule(new TimerTask()
+            {
+                @Override
+                public void run()
+                {
+                    mHandler.obtainMessage(MainActivity.MESSAGE_UPDATE_VIEW).sendToTarget();
+                }
+            }, 0, 350);
+        }
+    }
 
-		// loop through all PIDs
-		for (int position : positions)
-		{
-			// get corresponding Process variable
-			currPv = (EcuDataPv) mAdapter.getItem(position);
-			if (currPv == null) continue;
-			int pid = currPv.getAsInt(EcuDataPv.FID_PID);
-			// add PID to unique list of PIDs
-			pidNumbers.add(pid);
+    @Override
+    protected void onStop()
+    {
+        if (refreshTimer != null)
+        {
+            refreshTimer.cancel();
+            refreshTimer = null;
+        }
+        super.onStop();
+    }
 
-			// Get display color ...
-			int pidColor = ColorAdapter.getItemColor(currPv);
+    @Override
+    protected void onDestroy()
+    {
+        if (toolBarHider != null)
+        {
+            toolBarHider.cancel();
+            toolBarHider = null;
+        }
+        ObdProt.resetFixedPid();
+        if (wakeLock != null && wakeLock.isHeld())
+        {
+            wakeLock.release();
+        }
+        super.onDestroy();
+    }
 
-			// get contained data series
-			currSeries = (XYSeries) currPv.get(ObdItemAdapter.FID_DATA_SERIES);
-			if (currSeries == null) continue;
-			// add initial measurement to series data to ensure
-			// at least one measurement is available
-			if (currSeries.getItemCount() < 1)
-				currSeries.add(startTime, Float.parseFloat(currPv.get(EcuDataPv.FID_VALUE).toString()));
+    private int dp(int v)
+    {
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()));
+    }
 
-			// set scale to display series
-			currSeries.setScaleNumber(i);
-			// register series to graph
-			sensorData.addSeries(i, currSeries);
-			/* set up series visual parameters */
-			renderer.setYTitle(String.valueOf(currPv.get(EcuDataPv.FID_UNITS)), i);
-			renderer.setYAxisAlign(((i % 2) == 0) ? Align.LEFT : Align.RIGHT, i);
-			renderer.setYLabelsAlign(((i % 2) == 0) ? Align.LEFT : Align.RIGHT, i);
-			renderer.setYLabelsColor(i, pidColor);
-			/* set up new line renderer */
-			XYSeriesRenderer r = new XYSeriesRenderer();
-			r.setColor(pidColor);
-			r.setStroke(getStroke(pid!=0?pid:position));
-			// register line renderer
-			renderer.addSeriesRenderer(i, r);
-			i++;
-		}
-	}
+    private void setUpChartData(int[] positions)
+    {
+        long startTime = System.currentTimeMillis();
+        pidNumbers.clear();
+        seriesEntries.clear();
+        legendValueViews.clear();
+        legendCardViews.clear();
+
+        LinearLayout legendContainer = findViewById(R.id.chart_legend_container);
+        if (legendContainer != null)
+        {
+            legendContainer.removeAllViews();
+        }
+
+        if (mAdapter == null) return;
+
+        int seriesIdx = 0;
+        for (int position : positions)
+        {
+            if (position < 0 || position >= mAdapter.getCount()) continue;
+            Object rawItem = mAdapter.getItem(position);
+            if (!(rawItem instanceof EcuDataPv)) continue;
+            EcuDataPv currPv = (EcuDataPv) rawItem;
+
+            int pid = currPv.getAsInt(EcuDataPv.FID_PID);
+            if (pid > 0) pidNumbers.add(pid);
+
+            int pidColor = ColorAdapter.getItemColor(currPv);
+            XYSeries currSeries = (XYSeries) currPv.get(ObdItemAdapter.FID_DATA_SERIES);
+            if (currSeries == null) continue;
+
+            synchronized (currSeries)
+            {
+                if (currSeries.getItemCount() < 1)
+                {
+                    try
+                    {
+                        currSeries.add(startTime, Float.parseFloat(String.valueOf(currPv.get(EcuDataPv.FID_VALUE))));
+                    } catch (Exception ignored)
+                    {
+                    }
+                }
+            }
+
+            currSeries.setScaleNumber(seriesIdx);
+            sensorData.addSeries(seriesIdx, currSeries);
+
+            String title = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
+            String units = currPv.getUnits();
+            final ModernChartView.SeriesEntry entry =
+                    new ModernChartView.SeriesEntry(currSeries, title, units, pidColor);
+            seriesEntries.add(entry);
+
+            if (legendContainer != null)
+            {
+                View card = buildLegendCard(entry);
+                legendContainer.addView(card);
+            }
+            seriesIdx++;
+        }
+
+        if (chartView != null)
+        {
+            chartView.setSeriesEntries(seriesEntries);
+        }
+        refreshLegendValues();
+    }
+
+    private View buildLegendCard(final ModernChartView.SeriesEntry entry)
+    {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card);
+        card.setPadding(dp(10), dp(6), dp(10), dp(6));
+        card.setClickable(true);
+        card.setFocusable(true);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMarginEnd(dp(6));
+        card.setLayoutParams(lp);
+
+        View colorBar = new View(this);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(dp(4), dp(26));
+        barLp.setMarginEnd(dp(8));
+        colorBar.setLayoutParams(barLp);
+        colorBar.setBackgroundResource(R.drawable.bg_accent_bar);
+        Drawable d = colorBar.getBackground();
+        if (d != null)
+        {
+            d.mutate().setColorFilter(entry.color, PorterDuff.Mode.SRC_IN);
+        }
+        card.addView(colorBar);
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(entry.title);
+        tvTitle.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+        tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+        tvTitle.setMaxLines(1);
+        textCol.addView(tvTitle);
+
+        TextView tvVal = new TextView(this);
+        tvVal.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        tvVal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        tvVal.setTypeface(Typeface.DEFAULT_BOLD);
+        tvVal.setMaxLines(1);
+        textCol.addView(tvVal);
+
+        card.addView(textCol);
+
+        card.setOnClickListener(v -> {
+            entry.visible = !entry.visible;
+            card.setAlpha(entry.visible ? 1.0f : 0.42f);
+            if (chartView != null) chartView.invalidate();
+        });
+
+        legendValueViews.add(tvVal);
+        legendCardViews.add(card);
+        return card;
+    }
 }

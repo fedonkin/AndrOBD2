@@ -65,12 +65,14 @@ public class LiveDataRecorder
         final long wallTimeMs;
         final long elapsedSec;
         final Map<String, String> values;
+        String marker;
 
-        SampleRow(long wallTimeMs, long elapsedSec, Map<String, String> values)
+        SampleRow(long wallTimeMs, long elapsedSec, Map<String, String> values, String marker)
         {
             this.wallTimeMs = wallTimeMs;
             this.elapsedSec = elapsedSec;
             this.values = values;
+            this.marker = marker != null ? marker : "";
         }
     }
 
@@ -93,6 +95,8 @@ public class LiveDataRecorder
     private long startElapsedRealtimeMs = 0L;
     private long nextTickElapsedMs = 0L;
     private String lastSavedFilePath = null;
+    private int markerCount = 0;
+    private String pendingMarker = "";
 
     private Handler schedulerHandler;
     private Runnable onTickListener;
@@ -199,6 +203,12 @@ public class LiveDataRecorder
         }
         if (recording)
         {
+            if (!pendingMarker.isEmpty() && !rows.isEmpty())
+            {
+                SampleRow last = rows.get(rows.size() - 1);
+                last.marker = last.marker.isEmpty() ? pendingMarker : (last.marker + "," + pendingMarker);
+                pendingMarker = "";
+            }
             recording = false;
             sessionStopWallMs = stopWallMs;
         }
@@ -218,6 +228,41 @@ public class LiveDataRecorder
         sessionStartWallMs = 0L;
         sessionStopWallMs = 0L;
         lastSavedFilePath = null;
+        markerCount = 0;
+        pendingMarker = "";
+    }
+
+    /**
+     * Place a numbered event marker (MARK_1, MARK_2, ...) on the current 1-second timestamp.
+     *
+     * @return the newly created marker label, or empty string if not recording
+     */
+    public synchronized String addMarker()
+    {
+        return addMarkerAt(System.currentTimeMillis());
+    }
+
+    synchronized String addMarkerAt(long nowWallMs)
+    {
+        if (!recording) return "";
+        markerCount++;
+        String label = "MARK_" + markerCount;
+        if (!rows.isEmpty())
+        {
+            SampleRow last = rows.get(rows.size() - 1);
+            if (Math.abs(nowWallMs - last.wallTimeMs) <= 600L)
+            {
+                last.marker = last.marker.isEmpty() ? label : (last.marker + "," + label);
+                return label;
+            }
+        }
+        pendingMarker = pendingMarker.isEmpty() ? label : (pendingMarker + "," + label);
+        return label;
+    }
+
+    public synchronized int getMarkerCount()
+    {
+        return markerCount;
     }
 
     public synchronized boolean isRecording()
@@ -341,7 +386,9 @@ public class LiveDataRecorder
             }
         }
 
-        rows.add(new SampleRow(wallTimeMs, elapsedSec, snapshotValues));
+        String rowMarker = pendingMarker;
+        pendingMarker = "";
+        rows.add(new SampleRow(wallTimeMs, elapsedSec, snapshotValues, rowMarker));
         return true;
     }
 
@@ -493,10 +540,15 @@ public class LiveDataRecorder
         return sorted;
     }
 
+    public synchronized String buildFormattedLog(String timeHeader, String secHeader)
+    {
+        return buildFormattedLog(timeHeader, secHeader, "Mark");
+    }
+
     /**
      * Build the full time-series text table (with header comment + column titles + 1s rows).
      */
-    public synchronized String buildFormattedLog(String timeHeader, String secHeader)
+    public synchronized String buildFormattedLog(String timeHeader, String secHeader, String markHeader)
     {
         if (rows.isEmpty())
         {
@@ -510,22 +562,32 @@ public class LiveDataRecorder
         long startMs = rows.get(0).wallTimeMs;
         long endMs = rows.get(rows.size() - 1).wallTimeMs;
         long totalSec = rows.get(rows.size() - 1).elapsedSec;
+        boolean includeMarkers = markerCount > 0;
 
-        StringBuilder sb = new StringBuilder(Math.max(512, rows.size() * (sortedCols.size() * 8 + 20)));
+        StringBuilder sb = new StringBuilder(Math.max(512, rows.size() * (sortedCols.size() * 8 + 24)));
 
         // Metadata summary comment line
         sb.append("# AndrOBD2 Live Log | ")
                 .append(fullDateFmt.format(new Date(startMs)))
                 .append(" - ")
                 .append(rowTimeFmt.format(new Date(endMs)))
-                .append(String.format(Locale.US, " (%ds, 1s step, %d samples, %d params)",
-                        totalSec, rows.size(), sortedCols.size()))
-                .append('\n');
+                .append(String.format(Locale.US, " (%ds, 1s step, %d samples, %d params",
+                        totalSec, rows.size(), sortedCols.size()));
+        if (includeMarkers)
+        {
+            sb.append(String.format(Locale.US, ", %d marks", markerCount));
+        }
+        sb.append(")\n");
 
         // Header line
         sb.append(sanitizeCell(timeHeader != null ? timeHeader : "Time"))
                 .append(FIELD_SEPARATOR)
                 .append(sanitizeCell(secHeader != null ? secHeader : "Sec"));
+        if (includeMarkers)
+        {
+            sb.append(FIELD_SEPARATOR)
+                    .append(sanitizeCell(markHeader != null ? markHeader : "Mark"));
+        }
         for (ColumnMeta col : sortedCols)
         {
             sb.append(FIELD_SEPARATOR).append(col.header);
@@ -538,6 +600,10 @@ public class LiveDataRecorder
             sb.append(rowTimeFmt.format(new Date(row.wallTimeMs)))
                     .append(FIELD_SEPARATOR)
                     .append(row.elapsedSec);
+            if (includeMarkers)
+            {
+                sb.append(FIELD_SEPARATOR).append(row.marker != null ? row.marker : "");
+            }
             for (ColumnMeta col : sortedCols)
             {
                 String val = row.values.get(col.key);

@@ -262,6 +262,26 @@ public class MainActivity extends PluginManager
     private boolean pendingConnectAfterPermission = false;
     private boolean pendingConnectAfterBtEnable = false;
 
+    private static final int MAX_AUTO_RECONNECT_ATTEMPTS = 5;
+    private static final long[] AUTO_RECONNECT_DELAYS_MS = {1500L, 2000L, 2500L, 3000L, 4000L};
+    private boolean userRequestedDisconnect = false;
+    private boolean hadEstablishedConnection = false;
+    private boolean autoReconnecting = false;
+    private int autoReconnectAttempt = 0;
+    private int serviceBeforeReconnect = ObdProt.OBD_SVC_DATA;
+    private String lastConnectAddress = null;
+    private int lastConnectPort = DEFAULT_WIFI_PORT;
+    private boolean lastConnectSecure = false;
+
+    private final Runnable autoReconnectRunnable = new Runnable()
+    {
+        @Override
+        public void run()
+        {
+            performAutoReconnectStep();
+        }
+    };
+
     private static final int MAX_CLIPBOARD_CHARS = 400_000;
     static final LiveDataRecorder liveDataRecorder = new LiveDataRecorder(new LiveDataRecorder.DataSource()
     {
@@ -340,9 +360,12 @@ public class MainActivity extends PluginManager
                         break;
 
                     case MESSAGE_TOAST:
-                        Toast.makeText(getApplicationContext(),
-                                msg.getData().getString(TOAST),
-                                Toast.LENGTH_SHORT).show();
+                        if (!autoReconnecting)
+                        {
+                            Toast.makeText(getApplicationContext(),
+                                    msg.getData().getString(TOAST),
+                                    Toast.LENGTH_SHORT).show();
+                        }
                         break;
 
                     case MESSAGE_DATA_ITEMS_CHANGED:
@@ -355,6 +378,7 @@ public class MainActivity extends PluginManager
                                 {
                                     if (event.getSource() == ObdProt.PidPvs)
                                     {
+                                        applyActivePresetPolling();
                                         checkToRestoreLastDataSelection();
                                         checkToRestoreLastViewMode();
                                     }
@@ -378,6 +402,7 @@ public class MainActivity extends PluginManager
                             getListView().invalidateViews();
                         }
                         refreshDataListStats();
+                        refreshTelemetryBadges();
                         break;
 
                     case MESSAGE_OBD_STATE_CHANGED:
@@ -395,8 +420,12 @@ public class MainActivity extends PluginManager
                                 setObdService(restoredSvc != ObdProt.OBD_SVC_NONE ? restoredSvc : ObdProt.OBD_SVC_DATA, null);
                             } else if (obdService == ObdProt.OBD_SVC_NONE)
                             {
-                                // Automatically open Live Data once ECU is detected so data is immediately visible
                                 setObdService(ObdProt.OBD_SVC_DATA, getString(R.string.obd_data));
+                            } else
+                            {
+                                CommService.elm.setService(obdService,
+                                        (getMode() != MODE.FILE && getMode() != MODE.OFFLINE));
+                                applyActivePresetPolling();
                             }
                         }
                         break;
@@ -556,6 +585,11 @@ public class MainActivity extends PluginManager
 
         mPidAdapter = new ObdItemAdapter(this, R.layout.obd_item, ObdProt.PidPvs);
         mPidAdapter.setIncludePluginPvs(true);
+        mPidAdapter.setEnableFavorites(true);
+        mPidAdapter.setOnFavoritesChangedListener(() -> {
+            applyActivePresetPolling();
+            refreshDataListStats();
+        });
         mVidAdapter = new VidItemAdapter(this, R.layout.obd_item, ObdProt.VidPvs);
         mTidAdapter = new TidItemAdapter(this, R.layout.obd_item, ObdProt.VidPvs);
         mDfcAdapter = new DfcItemAdapter(this, R.layout.obd_item, ObdProt.tCodes);
@@ -714,6 +748,10 @@ public class MainActivity extends PluginManager
     @SuppressLint("MissingPermission")
     private void startRealConnection()
     {
+        cancelAutoReconnect();
+        userRequestedDisconnect = false;
+        hadEstablishedConnection = false;
+
         // Stop Demo mode cleanly if it was active
         if (getMode() == MODE.DEMO || ElmProt.runDemo)
         {
@@ -872,6 +910,9 @@ public class MainActivity extends PluginManager
      */
     private void startDemoMode()
     {
+        cancelAutoReconnect();
+        userRequestedDisconnect = false;
+        hadEstablishedConnection = false;
         if (mCommService != null)
         {
             mCommService.stop();
@@ -886,6 +927,9 @@ public class MainActivity extends PluginManager
      */
     private void disconnectSession()
     {
+        userRequestedDisconnect = true;
+        hadEstablishedConnection = false;
+        cancelAutoReconnect();
         if (mCommService != null)
         {
             mCommService.stop();
@@ -903,6 +947,78 @@ public class MainActivity extends PluginManager
         {
             ab.setTitle(R.string.app_name);
         }
+    }
+
+    private void cancelAutoReconnect()
+    {
+        autoReconnecting = false;
+        autoReconnectAttempt = 0;
+        mHandler.removeCallbacks(autoReconnectRunnable);
+    }
+
+    @SuppressLint("MissingPermission")
+    private void performAutoReconnectStep()
+    {
+        if (!autoReconnecting || userRequestedDisconnect || getMode() != MODE.ONLINE)
+        {
+            return;
+        }
+        try
+        {
+            if (mCommService != null)
+            {
+                mCommService.stop();
+                mCommService = null;
+            }
+
+            switch (CommService.medium)
+            {
+                case BLUETOOTH:
+                    if (lastConnectAddress != null && mBluetoothAdapter != null && mBluetoothAdapter.isEnabled())
+                    {
+                        connectBtDevice(lastConnectAddress, lastConnectSecure);
+                        return;
+                    }
+                    break;
+
+                case BLE:
+                    if (lastConnectAddress != null && mBluetoothAdapter != null && mBluetoothAdapter.isEnabled())
+                    {
+                        connectBleDevice(lastConnectAddress, lastConnectSecure);
+                        return;
+                    }
+                    break;
+
+                case NETWORK:
+                    String host = (lastConnectAddress != null)
+                            ? lastConnectAddress
+                            : prefs.getString(DEVICE_ADDRESS, DEFAULT_WIFI_ADDRESS);
+                    int port = (lastConnectPort > 0)
+                            ? lastConnectPort
+                            : getPrefsInt(DEVICE_PORT, DEFAULT_WIFI_PORT);
+                    connectNetworkDevice(host, port);
+                    return;
+
+                case USB:
+                    if (UsbDeviceListActivity.selectedPort != null)
+                    {
+                        mCommService = new UsbCommService(this, mHandler);
+                        mCommService.connect(UsbDeviceListActivity.selectedPort, true);
+                        return;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        } catch (Exception ex)
+        {
+            log.log(Level.WARNING, "Auto-reconnect attempt failed", ex);
+        }
+
+        // Could not initiate transport reconnect
+        cancelAutoReconnect();
+        setMode(MODE.OFFLINE);
     }
 
     /**
@@ -1112,10 +1228,34 @@ public class MainActivity extends PluginManager
             btnLiveRecord.setOnClickListener(v -> toggleLiveRecording());
         }
 
+        View btnLiveMark = mListView.findViewById(R.id.btn_live_mark);
+        if (btnLiveMark != null)
+        {
+            btnLiveMark.setOnClickListener(v -> addLiveRecordingMarker());
+        }
+
         View btnCopyLiveRecord = mListView.findViewById(R.id.btn_copy_live_record);
         if (btnCopyLiveRecord != null)
         {
             btnCopyLiveRecord.setOnClickListener(v -> copyLiveRecordingToClipboard());
+        }
+
+        View chipAll = mListView.findViewById(R.id.chip_preset_all);
+        View chipFav = mListView.findViewById(R.id.chip_preset_fav);
+        View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
+        View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
+        View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
+
+        if (chipAll != null) chipAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.ALL));
+        if (chipFav != null) chipFav.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FAVORITES));
+        if (chipStartup != null) chipStartup.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.STARTUP));
+        if (chipFuel != null) chipFuel.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FUEL));
+        if (chipDriving != null) chipDriving.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.DRIVING));
+
+        View btnCopyDtcReport = mListView.findViewById(R.id.btn_copy_dtc_report);
+        if (btnCopyDtcReport != null)
+        {
+            btnCopyDtcReport.setOnClickListener(v -> copyFaultCodeReportToClipboard());
         }
 
         View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
@@ -1123,6 +1263,52 @@ public class MainActivity extends PluginManager
         {
             btnClearCodesBar.setOnClickListener(v -> clearObdFaultCodes());
         }
+
+        refreshPresetChipsUi();
+    }
+
+    private void selectPidPreset(PidPresetManager.Preset preset)
+    {
+        mPidAdapter.setPreset(preset);
+        applyActivePresetPolling();
+        refreshPresetChipsUi();
+        refreshDataListStats();
+    }
+
+    private void applyActivePresetPolling()
+    {
+        if (obdService != ObdProt.OBD_SVC_DATA || dataViewMode != DATA_VIEW_MODE.LIST)
+        {
+            return;
+        }
+        PidPresetManager.Preset preset = mPidAdapter.getPreset();
+        TreeSet<Integer> fixed = PidPresetManager.computeFixedPids(
+                preset,
+                ObdProt.PidPvs.values(),
+                PidPresetManager.loadFavorites(prefs));
+        ObdProt.resetFixedPid();
+        if (!fixed.isEmpty())
+        {
+            setFixedPids(fixed);
+        }
+    }
+
+    private void refreshPresetChipsUi()
+    {
+        if (mListView == null || mPidAdapter == null) return;
+        PidPresetManager.Preset p = mPidAdapter.getPreset();
+
+        View chipAll = mListView.findViewById(R.id.chip_preset_all);
+        View chipFav = mListView.findViewById(R.id.chip_preset_fav);
+        View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
+        View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
+        View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
+
+        if (chipAll != null) chipAll.setSelected(p == PidPresetManager.Preset.ALL);
+        if (chipFav != null) chipFav.setSelected(p == PidPresetManager.Preset.FAVORITES);
+        if (chipStartup != null) chipStartup.setSelected(p == PidPresetManager.Preset.STARTUP);
+        if (chipFuel != null) chipFuel.setSelected(p == PidPresetManager.Preset.FUEL);
+        if (chipDriving != null) chipDriving.setSelected(p == PidPresetManager.Preset.DRIVING);
     }
 
     /**
@@ -1224,6 +1410,8 @@ public class MainActivity extends PluginManager
     {
         refreshHomeUi();
         refreshDataHeaderUi();
+        refreshPresetChipsUi();
+        refreshTelemetryBadges();
         refreshDataListStats();
         refreshLiveRecorderUi();
     }
@@ -1370,9 +1558,18 @@ public class MainActivity extends PluginManager
                     break;
                 case ONLINE:
                 default:
-                    tvSession.setText(R.string.status_online);
-                    tvSession.setBackgroundResource(R.drawable.bg_badge_online);
-                    tvSession.setTextColor(ContextCompat.getColor(this, R.color.status_online));
+                    if (autoReconnecting)
+                    {
+                        tvSession.setText(getString(R.string.status_reconnecting_fmt,
+                                Math.max(1, autoReconnectAttempt), MAX_AUTO_RECONNECT_ATTEMPTS));
+                        tvSession.setBackgroundResource(R.drawable.bg_badge_demo);
+                        tvSession.setTextColor(ContextCompat.getColor(this, R.color.status_demo));
+                    } else
+                    {
+                        tvSession.setText(R.string.status_online);
+                        tvSession.setBackgroundResource(R.drawable.bg_badge_online);
+                        tvSession.setTextColor(ContextCompat.getColor(this, R.color.status_online));
+                    }
                     break;
             }
         }
@@ -1435,12 +1632,60 @@ public class MainActivity extends PluginManager
         }
 
         View codesToolbar = mListView.findViewById(R.id.codes_toolbar);
+        View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
         if (codesToolbar != null)
         {
             boolean isCodesSvc = (obdService == ObdProt.OBD_SVC_READ_CODES
                     || obdService == ObdProt.OBD_SVC_PENDINGCODES
                     || obdService == ObdProt.OBD_SVC_PERMACODES);
-            codesToolbar.setVisibility(isCodesSvc && getMode() != MODE.FILE ? View.VISIBLE : View.GONE);
+            codesToolbar.setVisibility(isCodesSvc ? View.VISIBLE : View.GONE);
+            if (btnClearCodesBar != null)
+            {
+                btnClearCodesBar.setVisibility(getMode() != MODE.FILE ? View.VISIBLE : View.GONE);
+            }
+        }
+    }
+
+    private void refreshTelemetryBadges()
+    {
+        if (mListView == null) return;
+
+        TextView tvVolt = mListView.findViewById(R.id.tv_voltage_badge);
+        TextView tvRate = mListView.findViewById(R.id.tv_rate_badge);
+        boolean liveMode = (getMode() == MODE.ONLINE || getMode() == MODE.DEMO);
+
+        if (tvVolt != null)
+        {
+            double volts = liveMode
+                    ? PidPresetManager.extractBoardVoltage(ObdProt.PidPvs.values(), mPluginPvs.values())
+                    : Double.NaN;
+            if (!Double.isNaN(volts))
+            {
+                tvVolt.setText(String.format(Locale.getDefault(), getString(R.string.voltage_badge_fmt), volts));
+                boolean abnormal = (volts < 11.8 || volts > 15.2);
+                tvVolt.setBackgroundResource(abnormal ? R.drawable.bg_badge_danger : R.drawable.bg_badge_neutral);
+                tvVolt.setTextColor(ContextCompat.getColor(this,
+                        abnormal ? R.color.status_danger : R.color.text_primary));
+                tvVolt.setVisibility(View.VISIBLE);
+            } else
+            {
+                tvVolt.setVisibility(View.GONE);
+            }
+        }
+
+        if (tvRate != null)
+        {
+            double rate = (liveMode && !autoReconnecting)
+                    ? ObdItemAdapter.pollRateTracker.getUpdatesPerSecond(System.currentTimeMillis())
+                    : 0.0;
+            if (rate >= 0.5)
+            {
+                tvRate.setText(String.format(Locale.getDefault(), getString(R.string.poll_rate_badge_fmt), rate));
+                tvRate.setVisibility(View.VISIBLE);
+            } else
+            {
+                tvRate.setVisibility(View.GONE);
+            }
         }
     }
 
@@ -1470,7 +1715,13 @@ public class MainActivity extends PluginManager
                 {
                     tvEmpty.setText(R.string.empty_no_codes);
                 } else if (obdService == ObdProt.OBD_SVC_DATA
-                        && !mPidAdapter.getSearchQuery().isEmpty())
+                        && mPidAdapter.getPreset() == PidPresetManager.Preset.FAVORITES
+                        && PidPresetManager.loadFavorites(prefs).isEmpty())
+                {
+                    tvEmpty.setText(R.string.empty_no_favorites);
+                } else if (obdService == ObdProt.OBD_SVC_DATA
+                        && (!mPidAdapter.getSearchQuery().isEmpty()
+                        || mPidAdapter.getPreset() != PidPresetManager.Preset.ALL))
                 {
                     tvEmpty.setText(R.string.empty_no_search_match);
                 } else
@@ -1538,12 +1789,55 @@ public class MainActivity extends PluginManager
 
         final String exportText = liveDataRecorder.buildFormattedLog(
                 getString(R.string.time),
-                getString(R.string.live_rec_col_sec));
+                getString(R.string.live_rec_col_sec),
+                getString(R.string.live_rec_col_mark));
         saveRecordedCsvInBackground(exportText);
 
         if (showSummaryDialog && !isFinishing())
         {
             showLiveRecordingFinishedDialog();
+        }
+    }
+
+    private void addLiveRecordingMarker()
+    {
+        String mark = liveDataRecorder.addMarker();
+        if (!mark.isEmpty())
+        {
+            refreshLiveRecorderUi();
+            Toast.makeText(this,
+                    getString(R.string.live_rec_mark_added_fmt, mark),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void copyFaultCodeReportToClipboard()
+    {
+        DiagnosticReportBuilder.Labels labels = new DiagnosticReportBuilder.Labels(
+                getString(R.string.dtc_report_title),
+                getString(R.string.dtc_report_mil_on),
+                getString(R.string.dtc_report_mil_off),
+                getString(R.string.obd_veh_info),
+                getString(R.string.obd_codes),
+                getString(R.string.empty_no_codes),
+                getString(R.string.dtc_status_confirmed),
+                getString(R.string.dtc_status_pending),
+                getString(R.string.dtc_status_permanent),
+                getString(R.string.dtc_report_snapshot_section));
+
+        String report = DiagnosticReportBuilder.buildFaultReport(
+                System.currentTimeMillis(),
+                lastNumCodes,
+                ObdProt.tCodes != null ? ObdProt.tCodes.values() : null,
+                ObdProt.VidPvs != null ? ObdProt.VidPvs.values() : null,
+                ObdProt.PidPvs != null ? ObdProt.PidPvs.values() : null,
+                labels);
+
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null)
+        {
+            clipboard.setPrimaryClip(ClipData.newPlainText("AndrOBD2 Diagnostic Report", report));
+            Toast.makeText(this, R.string.dtc_report_copied_toast, Toast.LENGTH_LONG).show();
         }
     }
 
@@ -1573,7 +1867,8 @@ public class MainActivity extends PluginManager
 
         String fullLog = liveDataRecorder.buildFormattedLog(
                 getString(R.string.time),
-                getString(R.string.live_rec_col_sec));
+                getString(R.string.live_rec_col_sec),
+                getString(R.string.live_rec_col_mark));
         if (fullLog.isEmpty())
         {
             return;
@@ -1629,7 +1924,8 @@ public class MainActivity extends PluginManager
 
         String fullLog = liveDataRecorder.buildFormattedLog(
                 getString(R.string.time),
-                getString(R.string.live_rec_col_sec));
+                getString(R.string.live_rec_col_sec),
+                getString(R.string.live_rec_col_mark));
         Intent sendIntent = new Intent(Intent.ACTION_SEND);
         String savedPath = liveDataRecorder.getLastSavedFilePath();
         if (savedPath != null && new File(savedPath).exists())
@@ -1682,12 +1978,27 @@ public class MainActivity extends PluginManager
         ImageView ivRecordIcon = mListView.findViewById(R.id.iv_live_record_icon);
         TextView tvRecordLabel = mListView.findViewById(R.id.tv_live_record_label);
 
+        View btnMark = mListView.findViewById(R.id.btn_live_mark);
+        TextView tvMarkLabel = mListView.findViewById(R.id.tv_live_mark_label);
+
         View btnCopy = mListView.findViewById(R.id.btn_copy_live_record);
         TextView tvCopyLabel = mListView.findViewById(R.id.tv_copy_record_label);
 
         boolean isRec = liveDataRecorder.isRecording();
         boolean hasData = liveDataRecorder.hasSamples();
         int sampleCount = liveDataRecorder.getSampleCount();
+        int markerCount = liveDataRecorder.getMarkerCount();
+
+        if (btnMark != null)
+        {
+            btnMark.setVisibility(isRec ? View.VISIBLE : View.GONE);
+            if (tvMarkLabel != null)
+            {
+                tvMarkLabel.setText(markerCount > 0
+                        ? getString(R.string.live_rec_mark_fmt, markerCount)
+                        : getString(R.string.live_rec_mark));
+            }
+        }
 
         if (btnRecord != null && ivRecordIcon != null && tvRecordLabel != null)
         {
@@ -1807,6 +2118,7 @@ public class MainActivity extends PluginManager
             }
         };
         updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
+        applyActivePresetPolling();
         refreshAllUi();
 
         super.onResume();
@@ -1816,6 +2128,7 @@ public class MainActivity extends PluginManager
     @Override
     protected void onDestroy()
     {
+        cancelAutoReconnect();
         setAutoHider(false);
         liveDataRecorder.setOnTickListener(null);
         if (isFinishing() && liveDataRecorder.isRecording())
@@ -2180,6 +2493,7 @@ public class MainActivity extends PluginManager
 
             case REQUEST_GRAPH_DISPLAY_DONE:
                 dataViewMode = DATA_VIEW_MODE.LIST;
+                applyActivePresetPolling();
                 break;
         }
     }
@@ -2726,6 +3040,14 @@ public class MainActivity extends PluginManager
 
     private void setMode(MODE newMode)
     {
+        if (newMode != MODE.ONLINE)
+        {
+            cancelAutoReconnect();
+        }
+        if (newMode == MODE.OFFLINE || newMode == MODE.FILE)
+        {
+            ObdItemAdapter.pollRateTracker.reset();
+        }
         if (newMode != this.mode || newMode == MODE.FILE)
         {
             if ((newMode == MODE.OFFLINE || newMode == MODE.FILE)
@@ -2963,6 +3285,8 @@ public class MainActivity extends PluginManager
 
     private void connectBtDevice(String address, boolean secure)
     {
+        lastConnectAddress = address;
+        lastConnectSecure = secure;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
         mCommService = new BtCommService(this, mHandler);
         mCommService.connect(device, secure);
@@ -2974,6 +3298,8 @@ public class MainActivity extends PluginManager
      */
     private void connectBleDevice(String address, boolean secure)
     {
+        lastConnectAddress = address;
+        lastConnectSecure = secure;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
         mCommService = new BleCommService(this, mHandler);
         mCommService.connect(device, secure);
@@ -2981,6 +3307,8 @@ public class MainActivity extends PluginManager
 
     private void connectNetworkDevice(String address, int port)
     {
+        lastConnectAddress = address;
+        lastConnectPort = port;
         mCommService = new NetworkCommService(this, mHandler);
         ((NetworkCommService) mCommService).connect(address, port);
     }
@@ -3082,7 +3410,10 @@ public class MainActivity extends PluginManager
             currDataAdapter.filterPositions(selectedPositions);
 
             if (currDataAdapter == mPidAdapter)
+            {
+                ObdProt.resetFixedPid();
                 setFixedPids(selPids);
+            }
         } else
         {
             if (currDataAdapter == mPidAdapter)
@@ -3091,6 +3422,7 @@ public class MainActivity extends PluginManager
             if (currDataAdapter == mPidAdapter)
             {
                 currDataAdapter.setPvList(ObdProt.PidPvs);
+                applyActivePresetPolling();
             } else if (currDataAdapter == mVidAdapter)
             {
                 currDataAdapter.setPvList(ObdProt.VidPvs);
@@ -3147,6 +3479,14 @@ public class MainActivity extends PluginManager
     @SuppressLint("StringFormatInvalid")
     private void onConnect()
     {
+        boolean wasAutoReconnecting = autoReconnecting;
+        cancelAutoReconnect();
+        hadEstablishedConnection = true;
+        userRequestedDisconnect = false;
+        if (wasAutoReconnecting && obdService == ObdProt.OBD_SVC_NONE)
+        {
+            obdService = serviceBeforeReconnect;
+        }
         stopDemoService();
         mode = MODE.ONLINE;
         updateMenuVisibility();
@@ -3158,6 +3498,35 @@ public class MainActivity extends PluginManager
 
     private void onDisconnect()
     {
+        if (mode == MODE.ONLINE
+                && !userRequestedDisconnect
+                && hadEstablishedConnection
+                && autoReconnectAttempt < MAX_AUTO_RECONNECT_ATTEMPTS)
+        {
+            if (!autoReconnecting)
+            {
+                autoReconnecting = true;
+                serviceBeforeReconnect = (obdService != ObdProt.OBD_SVC_NONE)
+                        ? obdService
+                        : ObdProt.OBD_SVC_DATA;
+                Toast.makeText(this,
+                        R.string.reconnecting_keep_log_toast,
+                        Toast.LENGTH_SHORT).show();
+            }
+            long delayMs = AUTO_RECONNECT_DELAYS_MS[
+                    Math.min(autoReconnectAttempt, AUTO_RECONNECT_DELAYS_MS.length - 1)];
+            autoReconnectAttempt++;
+            setStatus(getString(R.string.status_reconnecting_fmt,
+                    autoReconnectAttempt, MAX_AUTO_RECONNECT_ATTEMPTS));
+            refreshDataHeaderUi();
+            refreshTelemetryBadges();
+            mHandler.removeCallbacks(autoReconnectRunnable);
+            mHandler.postDelayed(autoReconnectRunnable, delayMs);
+            return;
+        }
+
+        cancelAutoReconnect();
+        hadEstablishedConnection = false;
         setMode(MODE.OFFLINE);
     }
 
