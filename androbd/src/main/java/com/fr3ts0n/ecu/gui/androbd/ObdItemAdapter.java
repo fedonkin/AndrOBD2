@@ -40,7 +40,9 @@ import com.fr3ts0n.ecu.Conversion;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.HashConversion;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
@@ -346,16 +348,18 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             if (pv != null)
                 filtered.add(pv);
         }
-        if (JaguarStypeSupport.isEnabled()
+        VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
+        String seedKey = activeUi != null ? activeUi.getSettingsSeedPrefKey() : null;
+        if (seedKey != null
                 && prefs.contains(SettingsActivity.KEY_DATA_ITEMS)
-                && !prefs.getBoolean(SettingsActivity.KEY_JAGUAR_ITEMS_SEEDED, false))
+                && !prefs.getBoolean(seedKey, false))
         {
             for (Object val : pvs.values())
             {
                 if (val instanceof EcuDataPv)
                 {
                     int pid = ((EcuDataPv) val).getAsInt(EcuDataPv.FID_PID);
-                    if (JaguarStypeSupport.isMode22Pid(pid))
+                    if (VehicleProfileManager.ownsExtendedPid(pid))
                     {
                         filtered.add(val);
                     }
@@ -438,12 +442,12 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         String rawDescription = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
         String description = LiveDataRecorder.cleanDescription(pidNum, mnemonic, rawDescription, units);
         holder.tvDescr.setText(description);
-        if (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pidNum))
+        VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
+        String extSublabel = activeUi != null
+                ? activeUi.formatExtendedSublabel(pidNum, mnemonic) : null;
+        if (extSublabel != null)
         {
-            String sub = !mnemonic.isEmpty()
-                    ? String.format(Locale.US, "22%04X · %s", Integer.valueOf(pidNum), mnemonic)
-                    : String.format(Locale.US, "22%04X", Integer.valueOf(pidNum));
-            holder.tvSublabel.setText(sub);
+            holder.tvSublabel.setText(extSublabel);
             holder.tvSublabel.setVisibility(View.VISIBLE);
         } else if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
         {

@@ -1,7 +1,9 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import com.fr3ts0n.ecu.EcuDataPv;
-import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
+import com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarPids;
+import com.fr3ts0n.ecu.prot.obd.vehicles.kia.KiaPids;
 import com.fr3ts0n.pvs.PvList;
 
 import org.junit.After;
@@ -19,15 +21,15 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Unit tests for PID fast-polling presets, KIA Venga gated presets, favorite keys,
- * ECU voltage extraction, and poll rate tracking.
+ * Unit tests for PID fast-polling presets, per-brand UI profile gating (Jaguar &amp; KIA),
+ * favorite keys, ECU voltage extraction, and poll rate tracking.
  */
 public class PidPresetManagerTest
 {
     @After
     public void tearDown()
     {
-        KiaVengaSupport.setProfileByKey("standard", new PvList());
+        VehicleProfileManager.setProfileByKey("standard", new PvList());
     }
 
     private static EcuDataPv makePv(int pid, String mnem, String desc, Object val, String units)
@@ -55,12 +57,12 @@ public class PidPresetManagerTest
         List<EcuDataPv> all = Arrays.asList(rpm, ect, stft, speed, baro);
 
         TreeSet<Integer> startupFixed = PidPresetManager.computeFixedPids(
-                PidPresetManager.Preset.STARTUP, all, Collections.emptySet());
+                PidPresetManager.Preset.STARTUP, all, Collections.<String>emptySet());
         assertTrue(startupFixed.containsAll(Arrays.asList(0x05, 0x0C)));
         assertFalse(startupFixed.contains(0x33));
 
         TreeSet<Integer> fuelFixed = PidPresetManager.computeFixedPids(
-                PidPresetManager.Preset.FUEL, all, Collections.emptySet());
+                PidPresetManager.Preset.FUEL, all, Collections.<String>emptySet());
         assertTrue(fuelFixed.containsAll(Arrays.asList(0x06, 0x0C)));
         assertFalse(fuelFixed.contains(0x33));
 
@@ -78,23 +80,29 @@ public class PidPresetManagerTest
     }
 
     @Test
-    public void kiaPresetsAreStrictlyGatedOnKiaVengaProfile()
+    public void brandPresetsAreStrictlyIsolatedByActiveBrand()
     {
-        EcuDataPv kiaAtf = makePv(KiaVengaSupport.PID_BLK_TCM_21A0, "kia_atf_temp", "ATF Temp", 76.0f, "°C");
-        EcuDataPv kiaCvvt = makePv(KiaVengaSupport.PID_BLK_ECM_2117, "kia_cvvt_actual", "CVVT Angle", 14.0f, "°");
+        EcuDataPv jagTft = makePv(JaguarPids.PID_TRANS_FLUID_TEMP, "jag_trans_fluid_temp", "TFT", 82.0f, "°C");
+        EcuDataPv kiaAtf = makePv(KiaPids.PID_BLK_TCM_21A0, "kia_atf_temp", "ATF Temp", 76.0f, "°C");
+        EcuDataPv kiaCvvt = makePv(KiaPids.PID_BLK_ECM_2117, "kia_cvvt_actual", "CVVT Angle", 14.0f, "°");
 
-        KiaVengaSupport.setProfileByKey("standard", new PvList());
-        assertFalse(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_CHASSIS, Collections.emptySet()));
-        assertFalse(PidPresetManager.matchesPreset(kiaCvvt, PidPresetManager.Preset.KIA_ENGINE, Collections.emptySet()));
+        VehicleProfileManager.setProfileByKey("standard", new PvList());
+        assertFalse(PidPresetManager.matchesPreset(jagTft, PidPresetManager.Preset.JAGUAR_TRANS, Collections.<String>emptySet()));
+        assertFalse(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_CHASSIS, Collections.<String>emptySet()));
 
-        KiaVengaSupport.setProfileByKey("kia_venga_auto", new PvList());
-        assertTrue(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_CHASSIS, Collections.emptySet()));
-        assertTrue(PidPresetManager.matchesPreset(kiaCvvt, PidPresetManager.Preset.KIA_ENGINE, Collections.emptySet()));
-        assertTrue(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_ALL, Collections.emptySet()));
+        VehicleProfileManager.setProfileByKey("jaguar_stype_auto", new PvList());
+        assertTrue(PidPresetManager.matchesPreset(jagTft, PidPresetManager.Preset.JAGUAR_TRANS, Collections.<String>emptySet()));
+        assertFalse(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_CHASSIS, Collections.<String>emptySet()));
+
+        VehicleProfileManager.setProfileByKey("kia_venga_auto", new PvList());
+        assertFalse(PidPresetManager.matchesPreset(jagTft, PidPresetManager.Preset.JAGUAR_TRANS, Collections.<String>emptySet()));
+        assertTrue(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_CHASSIS, Collections.<String>emptySet()));
+        assertTrue(PidPresetManager.matchesPreset(kiaCvvt, PidPresetManager.Preset.KIA_ENGINE, Collections.<String>emptySet()));
+        assertTrue(PidPresetManager.matchesPreset(kiaAtf, PidPresetManager.Preset.KIA_ALL, Collections.<String>emptySet()));
     }
 
     @Test
-    public void extractsBoardVoltageFromStandardAndKiaSensorsAndIgnoresO2()
+    public void extractsBoardVoltageFromStandardAndBrandSensorsAndIgnoresO2()
     {
         EcuDataPv o2 = makePv(0x14, "o2_voltage_b1s1", "O2 Sensor B1S1", 0.72, "V");
         assertTrue(Double.isNaN(PidPresetManager.extractBoardVoltage(
@@ -104,7 +112,7 @@ public class PidPresetManagerTest
         assertEquals(14.25, PidPresetManager.extractBoardVoltage(
                 Arrays.asList(o2, ecuVolt), Collections.emptyList()), 0.001);
 
-        EcuDataPv kiaVolt = makePv(KiaVengaSupport.PID_BLK_CLU_B002, "kia_clu_voltage", "Cluster Voltage", 14.18, "V");
+        EcuDataPv kiaVolt = makePv(KiaPids.PID_BLK_CLU_B002, "kia_clu_voltage", "Cluster Voltage", 14.18, "V");
         assertEquals(14.18, PidPresetManager.extractBoardVoltage(
                 Arrays.asList(o2, kiaVolt), Collections.emptyList()), 0.001);
     }

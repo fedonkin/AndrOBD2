@@ -49,10 +49,11 @@ import androidx.preference.PreferenceScreen;
 import java.util.Locale;
 
 import com.fr3ts0n.ecu.EcuDataItem;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
-import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 
 import java.util.HashSet;
 import java.util.Vector;
@@ -71,11 +72,9 @@ public class SettingsActivity extends AppCompatActivity
 		"ext_file_dataitems"
 	};
 	static final String KEY_DATA_ITEMS = "data_items";
-	static final String KEY_JAGUAR_ITEMS_SEEDED = "jaguar_mode22_items_seeded";
-	static final String KEY_KIA_ITEMS_SEEDED = "kia_venga_items_seeded";
 	static final String KEY_PROT_SELECT = "protocol";
 	static final String KEY_COMM_MEDIUM = "comm_medium";
-	static final String KEY_VEHICLE_PROFILE = JaguarStypeSupport.PREF_KEY_VEHICLE_PROFILE;
+	static final String KEY_VEHICLE_PROFILE = VehicleProfileManager.PREF_KEY_VEHICLE_PROFILE;
 	static final String ELM_MIN_TIMEOUT = "elm_min_timeout";
 	static final String ELM_CMD_DISABLE = "elm_cmd_disable";
 	private static final String KEY_APP_LANGUAGE = "app_language";
@@ -105,8 +104,7 @@ public class SettingsActivity extends AppCompatActivity
 			activity.createConfigurationContext(config);
 		}
 		resources.updateConfiguration(config, resources.getDisplayMetrics());
-		JaguarStypeSupport.refreshLabels();
-		KiaVengaSupport.refreshLabels();
+		VehicleProfileManager.refreshLabels();
 	}
 
 	@Override
@@ -456,13 +454,9 @@ public class SettingsActivity extends AppCompatActivity
 
 			// collect data items for selection
 			items = new Vector<EcuDataItem>(ObdProt.dataItems.getSvcDataItems(ObdProt.OBD_SVC_DATA));
-			if (JaguarStypeSupport.isEnabled())
+			if (VehicleProfileManager.isCustomProfileActive())
 			{
-				items.addAll(JaguarStypeSupport.getAllMode22DataItems());
-			}
-			else if (KiaVengaSupport.isEnabled())
-			{
-				items.addAll(KiaVengaSupport.getAllExtendedDataItems());
+				items.addAll(VehicleProfileManager.getExtendedDataItems());
 			}
 			HashSet<String> selections = new HashSet<>();
 			CharSequence[] titles = new CharSequence[items.size()];
@@ -480,42 +474,29 @@ public class SettingsActivity extends AppCompatActivity
 			itemList.setEntries(titles);
 			itemList.setEntryValues(keys);
 
+			VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
+			String seedKey = activeUi != null ? activeUi.getSettingsSeedPrefKey() : null;
+
 			// if there is no item selected, mark all as selected
 			if (itemList.getValues().size() == 0)
 			{
 				itemList.setValues(selections);
-				if (JaguarStypeSupport.isEnabled())
+				if (seedKey != null)
 				{
-					prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
-				}
-				if (KiaVengaSupport.isEnabled())
-				{
-					prefs.edit().putBoolean(KEY_KIA_ITEMS_SEEDED, true).apply();
+					prefs.edit().putBoolean(seedKey, true).apply();
 				}
 			}
-			else if (JaguarStypeSupport.isEnabled()
-					&& !prefs.getBoolean(KEY_JAGUAR_ITEMS_SEEDED, false))
+			else if (seedKey != null && !prefs.getBoolean(seedKey, false))
 			{
-				// Seed Jaguar Mode 22 items once into an existing selection set so they start checked
+				// Seed brand extended items once into an existing selection set so they start checked
 				// while still allowing the user to uncheck individual items afterward.
 				HashSet<String> merged = new HashSet<String>(itemList.getValues());
-				for (EcuDataItem jagItem : JaguarStypeSupport.getAllMode22DataItems())
+				for (EcuDataItem extItem : VehicleProfileManager.getExtendedDataItems())
 				{
-					merged.add(jagItem.toString());
+					merged.add(extItem.toString());
 				}
 				itemList.setValues(merged);
-				prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
-			}
-			else if (KiaVengaSupport.isEnabled()
-					&& !prefs.getBoolean(KEY_KIA_ITEMS_SEEDED, false))
-			{
-				HashSet<String> merged = new HashSet<String>(itemList.getValues());
-				for (EcuDataItem kiaItem : KiaVengaSupport.getAllExtendedDataItems())
-				{
-					merged.add(kiaItem.toString());
-				}
-				itemList.setValues(merged);
-				prefs.edit().putBoolean(KEY_KIA_ITEMS_SEEDED, true).apply();
+				prefs.edit().putBoolean(seedKey, true).apply();
 			}
 		}
 
@@ -702,8 +683,7 @@ public class SettingsActivity extends AppCompatActivity
 			if(KEY_VEHICLE_PROFILE.equals(key))
 			{
 				String profVal = sharedPreferences.getString(KEY_VEHICLE_PROFILE, "standard");
-				JaguarStypeSupport.setProfileByKey(profVal, ObdProt.PidPvs);
-				KiaVengaSupport.setProfileByKey(profVal, ObdProt.PidPvs);
+				VehicleProfileManager.setProfileByKey(profVal, ObdProt.PidPvs);
 				setupPidSelection();
 			}
 

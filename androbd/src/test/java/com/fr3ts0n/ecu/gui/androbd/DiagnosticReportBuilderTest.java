@@ -3,8 +3,8 @@ package com.fr3ts0n.ecu.gui.androbd;
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.ObdCodeItem;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 
 import org.junit.Test;
 
@@ -96,14 +96,14 @@ public class DiagnosticReportBuilderTest
     {
         try
         {
-            JaguarStypeSupport.setProfileByKey("jaguar_stype_auto", null);
+            VehicleProfileManager.setProfileByKey("jaguar_stype_auto", null);
 
             ObdCodeItem pass = new ObdCodeItem(0x1111, "Диагностика систем завершена успешно (System Pass)");
             pass.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_READ_CODES));
 
             ObdCodeItem ccmFault = new ObdCodeItem(0x9265, "Привод заслонки обхода холодного воздуха — неисправность цепи");
             ccmFault.put(EcuCodeItem.FID_STATUS, Integer.valueOf(ObdProt.OBD_SVC_READ_CODES));
-            ccmFault.put(JaguarStypeSupport.CODE_FIELD_MODULE, "CCM");
+            ccmFault.put(VehicleProfileManager.CODE_FIELD_MODULE, "CCM");
 
             EcuDataPv tft = new EcuDataPv();
             tft.put(EcuDataPv.FID_PID, 0x1674);
@@ -142,7 +142,7 @@ public class DiagnosticReportBuilderTest
             assertTrue(report.contains("Температура масла АКПП (TFT): 82.5 °C"));
         } finally
         {
-            JaguarStypeSupport.setProfileByKey("standard", null);
+            VehicleProfileManager.setProfileByKey("standard", null);
         }
     }
 }

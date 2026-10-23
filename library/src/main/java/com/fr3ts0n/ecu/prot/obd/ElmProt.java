@@ -19,6 +19,10 @@
 package com.fr3ts0n.ecu.prot.obd;
 
 import com.fr3ts0n.ecu.ObdCodeItem;
+import com.fr3ts0n.ecu.prot.obd.vehicles.TelegramSink;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileHandler;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
 
@@ -615,7 +619,7 @@ public class ElmProt
 	}
 	
 	/**
-	 * Jaguar S-Type multi-module scan state (only used when JaguarStypeSupport.isEnabled())
+	 * Vehicle profile multi-module scan state (only used when a custom vehicle profile is active)
 	 */
 	private volatile boolean customModuleBusActive = false;
 	private volatile boolean moduleScanInProgress = false;
@@ -634,14 +638,7 @@ public class ElmProt
 		charsExpected = 0;
 		responsePending = false;
 		lastRxMsg = "";
-		if (JaguarStypeSupport.isEnabled())
-		{
-			JaguarStypeSupport.resetSessionState();
-		}
-		if (KiaVengaSupport.isEnabled())
-		{
-			KiaVengaSupport.resetSessionState();
-		}
+		VehicleProfileManager.resetSessionState();
 		// reset all learned protocol data
 		super.reset();
 		// either RESET or INFO command needs to be enabled
@@ -745,17 +742,9 @@ public class ElmProt
 				byte[] binBuff = fromHex(buffer);
 				int b0 = binBuff[0] & 0xFF;
 				int b1 = binBuff[1] & 0xFF;
-				// Headerless Jaguar / KIA extended (61/62...) and module DTC/session replies (50/53/54/58/59)
+				// Headerless extended (61/62...) and module DTC/session replies (50/53/54/58/59)
 				// must never be sliced as raw ISO headers when last payload byte happens to match sum%256
-				if (JaguarStypeSupport.isEnabled()
-						&& (b0 == 0x62 || b0 == 0x53 || b0 == 0x58 || b0 == 0x59 || b0 == 0x50 || b0 == 0x54)
-						&& b1 != 0x6B && b1 != 0xF1)
-				{
-					return false;
-				}
-				if (KiaVengaSupport.isEnabled()
-						&& (b0 == 0x61 || b0 == 0x62 || b0 == 0x58 || b0 == 0x59 || b0 == 0x50 || b0 == 0x54)
-						&& b1 != 0x6B && b1 != 0xF1)
+				if (b1 != 0x6B && b1 != 0xF1 && VehicleProfileManager.isUnframedPositiveReply(buffer))
 				{
 					return false;
 				}
@@ -1012,41 +1001,23 @@ public class ElmProt
 								case OBD_SVC_FREEZEFRAME:
 								{
 									if (service == OBD_SVC_DATA
-											&& JaguarStypeSupport.isEnabled()
+											&& VehicleProfileManager.isCustomProfileActive()
 											&& hasSupportedPids())
 									{
-										String mode22Cmd = JaguarStypeSupport.nextInterleavedMode22Command(
-												System.currentTimeMillis(), true);
-										if (mode22Cmd != null)
-										{
-											List<String> pollSeq = JaguarStypeSupport.buildMode22PollSequence(
-													mode22Cmd,
-													ecuAddresses,
-													selectedEcuAddress,
-													detectedJ1850Pwm || preferredProtocol == PROT.ELM_PROT_J1850PWM);
-											if (pollSeq.size() == 1)
-											{
-												sendTelegram(pollSeq.get(0).toCharArray());
-											}
-											else if (!pollSeq.isEmpty())
-											{
-												pushOrderedCommands(pollSeq);
-												sendQueuedTelegram();
-											}
-											break;
-										}
-									}
-									else if (service == OBD_SVC_DATA
-											&& KiaVengaSupport.isEnabled()
-											&& hasSupportedPids())
-									{
-										List<String> kiaSeq = KiaVengaSupport.nextInterleavedPollSequence(
+										List<String> pollSeq = VehicleProfileManager.nextInterleavedPollSequence(
 												System.currentTimeMillis(),
 												true,
-												selectedEcuAddress);
-										if (!kiaSeq.isEmpty())
+												ecuAddresses,
+												selectedEcuAddress,
+												detectedJ1850Pwm || preferredProtocol == PROT.ELM_PROT_J1850PWM);
+										if (pollSeq.size() == 1)
 										{
-											pushOrderedCommands(kiaSeq);
+											sendTelegram(pollSeq.get(0).toCharArray());
+											break;
+										}
+										else if (!pollSeq.isEmpty())
+										{
+											pushOrderedCommands(pollSeq);
 											sendQueuedTelegram();
 											break;
 										}
@@ -1287,17 +1258,10 @@ public class ElmProt
 
 	private boolean handleOptionalProfileFailure()
 	{
-		if (JaguarStypeSupport.isEnabled()
-				&& (moduleScanInProgress || JaguarStypeSupport.isOptionalJaguarCommand(lastTxMsg)))
+		if (VehicleProfileManager.isCustomProfileActive()
+				&& (moduleScanInProgress || VehicleProfileManager.isOptionalCommand(lastTxMsg)))
 		{
-			JaguarStypeSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
-			proceedAfterOptionalFailure();
-			return true;
-		}
-		if (KiaVengaSupport.isEnabled()
-				&& (moduleScanInProgress || KiaVengaSupport.isOptionalKiaCommand(lastTxMsg)))
-		{
-			KiaVengaSupport.onOptionalCommandFailed(0, 0, lastTxMsg);
+			VehicleProfileManager.onOptionalCommandFailed(0, 0, lastTxMsg);
 			proceedAfterOptionalFailure();
 			return true;
 		}
@@ -1305,7 +1269,7 @@ public class ElmProt
 	}
 
 	/**
-	 * Continue draining queued commands or resume polling after an optional Jaguar/KIA command
+	 * Continue draining queued commands or resume polling after an optional custom vehicle command
 	 * (Mode 21/22 PID probe or multi-module DTC request) returns NODATA / CANERROR / NOCONN.
 	 */
 	private void proceedAfterOptionalFailure()
@@ -1376,18 +1340,27 @@ public class ElmProt
 		return cmds;
 	}
 
-	/**
-	 * Scan DTCs on a specific 2002 Jaguar S-Type module (only active when Jaguar S-Type is selected).
-	 */
-	public synchronized void scanJaguarModuleDtcs(JaguarStypeSupport.DiagModule module)
+	private final TelegramSink demoObdSink = new TelegramSink()
 	{
-		if (!JaguarStypeSupport.isEnabled())
+		@Override
+		public void sendTelegram(char[] telegram)
+		{
+			ElmProt.super.handleTelegram(telegram);
+		}
+	};
+
+	/**
+	 * Scan fault codes on a specific vehicle ECU module for the currently active brand profile.
+	 */
+	public synchronized void scanVehicleModuleDtcs(VehicleModule module)
+	{
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
 		{
 			return;
 		}
-		JaguarStypeSupport.DiagModule target =
-				(module != null) ? module : JaguarStypeSupport.DiagModule.ENGINE_OBD;
-		JaguarStypeSupport.setActiveModule(target);
+		handler.setActiveModule(module);
+		VehicleModule target = handler.getActiveModule();
 		demoCodesCleared = false;
 		this.service = OBD_SVC_READ_CODES;
 		cmdStack.clear();
@@ -1395,11 +1368,11 @@ public class ElmProt
 
 		if (runDemo)
 		{
-			simulateJaguarDemoDtcs(target);
+			handler.emitDemoDtcs(target, demoObdSink);
 			return;
 		}
 
-		if (target == JaguarStypeSupport.DiagModule.ENGINE_OBD)
+		if (target == null || target.isEngineObd())
 		{
 			moduleScanInProgress = false;
 			List<String> seq = new ArrayList<String>();
@@ -1411,13 +1384,16 @@ public class ElmProt
 			seq.add("0101");
 			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
 			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
+			if (handler.supportsPermanentDtcMode0A())
+			{
+				seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
+			}
 			pushOrderedCommands(seq);
 			sendQueuedTelegram();
 		}
 		else
 		{
-			List<String> cmds = JaguarStypeSupport.buildModuleReadCommands(
-					target, JaguarStypeSupport.getProfile());
+			List<String> cmds = handler.buildModuleReadCommands(target);
 			if (!cmds.isEmpty())
 			{
 				customModuleBusActive = true;
@@ -1429,17 +1405,17 @@ public class ElmProt
 	}
 
 	/**
-	 * Clear DTCs on a specific 2002 Jaguar S-Type module and re-scan to confirm.
+	 * Clear fault codes on a specific vehicle ECU module and re-scan to confirm.
 	 */
-	public synchronized void clearJaguarModuleDtcs(JaguarStypeSupport.DiagModule module)
+	public synchronized void clearVehicleModuleDtcs(VehicleModule module)
 	{
-		if (!JaguarStypeSupport.isEnabled())
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
 		{
 			return;
 		}
-		JaguarStypeSupport.DiagModule target =
-				(module != null) ? module : JaguarStypeSupport.DiagModule.ENGINE_OBD;
-		JaguarStypeSupport.setActiveModule(target);
+		handler.setActiveModule(module);
+		VehicleModule target = handler.getActiveModule();
 		cmdStack.clear();
 		prepareModuleScanReset();
 
@@ -1450,7 +1426,7 @@ public class ElmProt
 			return;
 		}
 
-		if (target == JaguarStypeSupport.DiagModule.ENGINE_OBD)
+		if (target == null || target.isEngineObd())
 		{
 			moduleScanInProgress = false;
 			List<String> seq = new ArrayList<String>();
@@ -1463,6 +1439,10 @@ public class ElmProt
 			seq.add("0101");
 			seq.add("03");
 			seq.add("07");
+			if (handler.supportsPermanentDtcMode0A())
+			{
+				seq.add("0A");
+			}
 			this.service = OBD_SVC_READ_CODES;
 			pushOrderedCommands(seq);
 			sendQueuedTelegram();
@@ -1470,10 +1450,8 @@ public class ElmProt
 		else
 		{
 			List<String> seq = new ArrayList<String>();
-			seq.addAll(JaguarStypeSupport.buildModuleClearCommands(
-					target, JaguarStypeSupport.getProfile()));
-			seq.addAll(JaguarStypeSupport.buildModuleReadCommands(
-					target, JaguarStypeSupport.getProfile()));
+			seq.addAll(handler.buildModuleClearCommands(target));
+			seq.addAll(handler.buildModuleReadCommands(target));
 			if (!seq.isEmpty())
 			{
 				this.service = OBD_SVC_READ_CODES;
@@ -1483,376 +1461,6 @@ public class ElmProt
 				sendQueuedTelegram();
 			}
 		}
-	}
-
-	/**
-	 * Scan DTCs on a specific KIA Venga ECU module (only active when KIA Venga profile is selected).
-	 */
-	public synchronized void scanKiaModuleDtcs(KiaVengaSupport.DiagModule module)
-	{
-		if (!KiaVengaSupport.isEnabled())
-		{
-			return;
-		}
-		KiaVengaSupport.DiagModule target =
-				(module != null) ? module : KiaVengaSupport.DiagModule.ENGINE_OBD;
-		KiaVengaSupport.setActiveModule(target);
-		demoCodesCleared = false;
-		this.service = OBD_SVC_READ_CODES;
-		cmdStack.clear();
-		prepareModuleScanReset();
-
-		if (runDemo)
-		{
-			simulateKiaDemoDtcs(target);
-			return;
-		}
-
-		if (target == KiaVengaSupport.DiagModule.ENGINE_OBD)
-		{
-			moduleScanInProgress = false;
-			List<String> seq = new ArrayList<String>();
-			if (customModuleBusActive)
-			{
-				seq.addAll(buildStandardBusRestoreCommands());
-				customModuleBusActive = false;
-			}
-			seq.add("0101");
-			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
-			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
-			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
-			pushOrderedCommands(seq);
-			sendQueuedTelegram();
-		}
-		else
-		{
-			List<String> cmds = KiaVengaSupport.buildModuleReadCommands(target);
-			if (!cmds.isEmpty())
-			{
-				customModuleBusActive = true;
-				moduleScanInProgress = true;
-				pushOrderedCommands(cmds);
-				sendQueuedTelegram();
-			}
-		}
-	}
-
-	/**
-	 * Clear DTCs on a specific KIA Venga ECU module and re-scan to confirm.
-	 */
-	public synchronized void clearKiaModuleDtcs(KiaVengaSupport.DiagModule module)
-	{
-		if (!KiaVengaSupport.isEnabled())
-		{
-			return;
-		}
-		KiaVengaSupport.DiagModule target =
-				(module != null) ? module : KiaVengaSupport.DiagModule.ENGINE_OBD;
-		KiaVengaSupport.setActiveModule(target);
-		cmdStack.clear();
-		prepareModuleScanReset();
-
-		if (runDemo)
-		{
-			demoCodesCleared = true;
-			tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
-			return;
-		}
-
-		if (target == KiaVengaSupport.DiagModule.ENGINE_OBD)
-		{
-			moduleScanInProgress = false;
-			List<String> seq = new ArrayList<String>();
-			if (customModuleBusActive)
-			{
-				seq.addAll(buildStandardBusRestoreCommands());
-				customModuleBusActive = false;
-			}
-			seq.add("04");
-			seq.add("0101");
-			seq.add("03");
-			seq.add("07");
-			seq.add("0A");
-			this.service = OBD_SVC_READ_CODES;
-			pushOrderedCommands(seq);
-			sendQueuedTelegram();
-		}
-		else
-		{
-			List<String> seq = new ArrayList<String>();
-			seq.addAll(KiaVengaSupport.buildModuleClearCommands(target));
-			seq.addAll(KiaVengaSupport.buildModuleReadCommands(target));
-			if (!seq.isEmpty())
-			{
-				this.service = OBD_SVC_READ_CODES;
-				customModuleBusActive = true;
-				moduleScanInProgress = true;
-				pushOrderedCommands(seq);
-				sendQueuedTelegram();
-			}
-		}
-	}
-
-	private void simulateKiaDemoDtcs(KiaVengaSupport.DiagModule module)
-	{
-		boolean isDiesel = (KiaVengaSupport.getProfile() == KiaVengaSupport.Profile.VENGA_DIESEL);
-		switch (module)
-		{
-			case ECM:
-				if (isDiesel)
-				{
-					// P1186 (CRDi Fuel Rail Pressure Too Low), P1405 (DPF Regen Incomplete)
-					super.handleTelegram("5902FF1186000814050004".toCharArray());
-				}
-				else
-				{
-					// P1312 (Gamma Ignition Coil 2), P1690 (SMARTRA Immobilizer No Response)
-					super.handleTelegram("5902FF1312000816900004".toCharArray());
-				}
-				break;
-			case TCM:
-				// P1706 (Inhibitor Switch PRND), P0711 (ATF Temp Sensor Range)
-				super.handleTelegram("5902FF1706000807110004".toCharArray());
-				break;
-			case ABS_ESC:
-				// C1513 (5513: Brake Light Switch), C1200 (5200: FL Wheel Speed Sensor)
-				super.handleTelegram("5902FF5513000852000004".toCharArray());
-				break;
-			case MDPS:
-				// C1290 (5290: MDPS Torque Sensor), C1261 (5261: SAS Not Calibrated)
-				super.handleTelegram("5902FF5290000852610004".toCharArray());
-				break;
-			case SRS_ACU:
-				// B1346 (9346: Driver Airbag Clock Spring), B1378 (9378: Side Airbag Connector)
-				super.handleTelegram("5902FF9346000893780004".toCharArray());
-				break;
-			case BCM:
-				// B1978 (9978: Start/Stop Button), U1111 (D111: IBS Battery Sensor LIN)
-				super.handleTelegram("5902FF99780008D1110004".toCharArray());
-				break;
-			case CLU:
-				// U0155 (C155: Cluster CAN Communication)
-				super.handleTelegram("5902FFC1550004".toCharArray());
-				break;
-			case FATC:
-				// B2406 (A406: Air-Mix Flap Motor), B1242 (9242: Evaporator Temp Sensor Open)
-				super.handleTelegram("5902FFA406000892420004".toCharArray());
-				break;
-			case TPMS:
-				// C1121 (5121: FL TPMS Battery Low), C1312 (5312: FL TPMS RF Signal Loss)
-				super.handleTelegram("5902FF5121000853120004".toCharArray());
-				break;
-			case ENGINE_OBD:
-			default:
-				super.handleTelegram("410183000000".toCharArray());
-				if (isDiesel)
-				{
-					super.handleTelegram("430211861405".toCharArray());
-					super.handleTelegram("47011324".toCharArray());
-				}
-				else
-				{
-					super.handleTelegram("430213120420".toCharArray());
-					super.handleTelegram("47011693".toCharArray());
-				}
-				break;
-		}
-	}
-
-	private void simulateKiaDemoExtended(int tick)
-	{
-		// 1. ECM 7E0 2101 (35 bytes): V=14.2V (209), Idle=750 (75), MAP=36.5 kPa, EOT=91.5 C
-		char[] ecm01 = new char[35];
-		ecm01[5] = (char) 209;
-		ecm01[9] = (char) 75;
-		int mapRaw = 9344 + (tick % 40) * 64; // LE u16 / 256 -> ~36.5..46.5 kPa
-		ecm01[16] = (char) (mapRaw & 0xFF);
-		ecm01[17] = (char) ((mapRaw >> 8) & 0xFF);
-		ecm01[34] = (char) (184 + (tick % 8)); // *0.75 - 48 -> 90.0..95.25 C
-		KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x01, ecm01, PidPvs);
-
-		if (KiaVengaSupport.getProfile() != KiaVengaSupport.Profile.VENGA_DIESEL)
-		{
-			// Gamma CVVT 2117: Target ~ 14.0 deg (s8=28), Actual ~ 13.8 deg (s16_le=1766)
-			char[] cvvt = new char[7];
-			int deg2 = 20 + (tick % 24);
-			cvvt[4] = (char) (deg2 & 0xFF);
-			int actLe = deg2 * 64 - 16;
-			cvvt[5] = (char) (actLe & 0xFF);
-			cvvt[6] = (char) ((actLe >> 8) & 0xFF);
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x17, cvvt, PidPvs);
-
-			// Knock Retard 2116 & Misfires 2108
-			char[] knock = new char[16];
-			knock[13] = (char) ((tick % 15 == 0) ? 2 : 0); // occasional 1.5 deg on cyl 2
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x16, knock, PidPvs);
-
-			char[] mf = new char[24];
-			mf[18] = (char) (demoCodesCleared ? 0 : 3); // cyl 2 misfire count
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x08, mf, PidPvs);
-		}
-
-		if (KiaVengaSupport.getProfile() != KiaVengaSupport.Profile.VENGA_PETROL)
-		{
-			// CRDi 2103: EGT ~ 315 C, Dist since DPF regen ~ 184.5 km (184500 m)
-			char[] crdi03 = new char[57];
-			crdi03[46] = (char) (45 + (tick % 15));
-			int distM = 184500 + tick * 12;
-			crdi03[53] = (char) ((distM >> 24) & 0xFF);
-			crdi03[54] = (char) ((distM >> 16) & 0xFF);
-			crdi03[55] = (char) ((distM >> 8) & 0xFF);
-			crdi03[56] = (char) (distM & 0xFF);
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x03, crdi03, PidPvs);
-
-			char[] crdi06 = new char[26];
-			crdi06[25] = (char) ((tick % 50 > 40) ? 1 : 0);
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x06, crdi06, PidPvs);
-
-			char[] dpf22 = new char[13];
-			dpf22[12] = (char) (28 + (tick % 10)); // ~10.9..14.7 g soot
-			KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_EXT_DATA, 0xED94, dpf22, PidPvs);
-		}
-
-		// IBS Battery 2127: SOC 86%, SOH 94%, Current +4.8 A ((204.8/0.008)=25600=0x6400)
-		char[] ibs = new char[14];
-		ibs[6] = 0x64;
-		ibs[7] = (char) ((tick % 20) * 8);
-		ibs[12] = (char) 86;
-		ibs[13] = (char) 94;
-		KiaVengaSupport.onExtendedResponse("7E0", OBD_SVC_KWP_DATA, 0x27, ibs, PidPvs);
-
-		// TCM 7E1 21A0: ATF ~ 78 C (118), Slip ~ 18 RPM (2120=0x0848), Gear 1..6, Turbine/Output RPM
-		char[] tcm = new char[24];
-		int turbRaw = (1800 + (tick % 40) * 20) * 4;
-		int outRaw = (1760 + (tick % 40) * 20) * 4;
-		tcm[9] = (char) ((turbRaw >> 8) & 0xFF);
-		tcm[10] = (char) (turbRaw & 0xFF);
-		tcm[11] = (char) ((outRaw >> 8) & 0xFF);
-		tcm[12] = (char) (outRaw & 0xFF);
-		tcm[13] = (char) (116 + (tick % 6));
-		int slipRaw = (512 + 12 + (tick % 24)) * 4;
-		tcm[16] = (char) ((slipRaw >> 8) & 0xFF);
-		tcm[17] = (char) (slipRaw & 0xFF);
-		tcm[21] = (char) (1 + ((tick / 8) % 6));
-		KiaVengaSupport.onExtendedResponse("7E1", OBD_SVC_KWP_DATA, 0xA0, tcm, PidPvs);
-
-		// ABS 7D1 2101: Wheel speeds ~ 58 km/h
-		char[] abs = new char[15];
-		int spd = 42 + (tick % 30);
-		abs[11] = (char) spd;
-		abs[12] = (char) spd;
-		abs[13] = (char) spd;
-		abs[14] = (char) spd;
-		KiaVengaSupport.onExtendedResponse("7D1", OBD_SVC_KWP_DATA, 0x01, abs, PidPvs);
-
-		// MDPS 7D4 2101 (SAS angle) & 220101 (Motor current)
-		char[] mdps01 = new char[5];
-		short sasRaw = (short) (((tick % 30) - 15) * 6); // -9.0 .. +8.4 deg
-		mdps01[3] = (char) ((sasRaw >> 8) & 0xFF);
-		mdps01[4] = (char) (sasRaw & 0xFF);
-		KiaVengaSupport.onExtendedResponse("7D4", OBD_SVC_KWP_DATA, 0x01, mdps01, PidPvs);
-
-		char[] mdps22 = new char[12];
-		mdps22[11] = (char) (3 + (tick % 5));
-		KiaVengaSupport.onExtendedResponse("7D4", OBD_SVC_EXT_DATA, 0x0101, mdps22, PidPvs);
-
-		// Cluster 7C6 22B002: Fuel 31.5 L (63), V 14.22 V (182), Odometer 128450 km (0x01F5C2)
-		char[] clu = new char[12];
-		clu[4] = (char) 63;
-		clu[5] = (char) 182;
-		int odoKm = 128450;
-		clu[6] = (char) ((odoKm >> 16) & 0xFF);
-		clu[7] = (char) ((odoKm >> 8) & 0xFF);
-		clu[8] = (char) (odoKm & 0xFF);
-		KiaVengaSupport.onExtendedResponse("7C6", OBD_SVC_EXT_DATA, 0xB002, clu, PidPvs);
-
-		// TPMS 7D6 2106: ~2.25 bar (163), ~26 C (76)
-		char[] tpms = new char[16];
-		tpms[0] = (char) 163; tpms[1] = (char) 76;
-		tpms[4] = (char) 164; tpms[5] = (char) 76;
-		tpms[8] = (char) 161; tpms[9] = (char) 74;
-		tpms[12] = (char) 162; tpms[13] = (char) 75;
-		KiaVengaSupport.onExtendedResponse("7D6", OBD_SVC_KWP_DATA, 0x06, tpms, PidPvs);
-	}
-
-	private void simulateJaguarDemoDtcs(JaguarStypeSupport.DiagModule module)
-	{
-		switch (module)
-		{
-			case PCM_SCP:
-			case ECM_CAN:
-				// P1111 (System Pass), P1646 (Linear O2 B1S1), P1384 (VVT B1), P1532 (IMT B2)
-				super.handleTelegram("5804111160164660138460153220".toCharArray());
-				break;
-			case TCM:
-				// P1780 (Trans Control Switch J-Gate), P0730 (Incorrect Gear Ratio)
-				super.handleTelegram("5802178060073060".toCharArray());
-				break;
-			case ABS_DSC:
-				// C1095 (5095: ABS Hydraulic Pump Motor), C1145 (5145: RF Wheel Speed Sensor)
-				super.handleTelegram("5802509560514520".toCharArray());
-				break;
-			case CCM:
-				// B1265 (9265: Cool Air Bypass Servo), U2520 (E520: CAN Timeout from ICCM)
-				super.handleTelegram("539265E520".toCharArray());
-				break;
-			case IC_PATS:
-				// B1600 (9600: PATS Transponder Not Received), U1262 (D262: SCP J1850 Bus Fault)
-				super.handleTelegram("5802960060D26220".toCharArray());
-				break;
-			case RCM:
-				// B1921 (9921: Airbag Diagnostic Monitor Ground), B1318 (9318: Battery Voltage Low)
-				super.handleTelegram("5802992160931820".toCharArray());
-				break;
-			case EPB:
-				// C1093 (5093: EPB Switch Circuit), C1D15 (5D15: Park Brake Latch Switch)
-				super.handleTelegram("58025093605D1520".toCharArray());
-				break;
-			case ENGINE_OBD:
-			default:
-				// Standard OBD + Jaguar P1111, P1646, P0171, P0174
-				super.handleTelegram("410183000000".toCharArray());
-				super.handleTelegram("4303111116460171".toCharArray());
-				super.handleTelegram("470201741384".toCharArray());
-				break;
-		}
-	}
-
-	private void simulateJaguarDemoMode22(int tick)
-	{
-		// TFT ~ 82.5 C (180.5 F -> raw = 1444 = 0x05A4)
-		int tftRaw = 1400 + (tick % 80);
-		super.handleTelegram(String.format(Locale.US, "621674%04X", Integer.valueOf(tftRaw)).toCharArray());
-		// TOT (ZF 6HP26 1-byte CAN formula: raw - 50 C -> 83..92 C)
-		int totByte = 133 + (tick % 10);
-		super.handleTelegram(String.format(Locale.US, "6211BD%02X", Integer.valueOf(totByte)).toCharArray());
-		// EOT ~ 96.0 C (raw = 13600 = 0x3520)
-		int eotRaw = 13300 + (tick % 120) * 4;
-		super.handleTelegram(String.format(Locale.US, "621310%04X", Integer.valueOf(eotRaw)).toCharArray());
-		// TC Slip ~ 12..48 RPM (raw = slip * 4)
-		int slipRaw = (8 + (tick % 36)) * 4;
-		super.handleTelegram(String.format(Locale.US, "6211B8%04X", Integer.valueOf(slipRaw)).toCharArray());
-		// Current Gear 1..5 (raw = gear * 2)
-		int gearRaw = (1 + ((tick / 10) % 5)) * 2;
-		super.handleTelegram(String.format(Locale.US, "6211B3%02X", Integer.valueOf(gearRaw)).toCharArray());
-		// Cooling Fan Speed & Duty
-		int fanByte = 60 + (tick % 40);
-		super.handleTelegram(String.format(Locale.US, "62162B%02X", Integer.valueOf(fanByte)).toCharArray());
-		super.handleTelegram(String.format(Locale.US, "62163F%02X", Integer.valueOf(fanByte)).toCharArray());
-		// VVT Bank 1 & Bank 2 Duty + Angle + Error
-		int vvtDuty1 = 9800 + (tick % 60) * 80;
-		int vvtDuty2 = 9600 + (tick % 60) * 80;
-		int vvtAngle = (int) ((12 + (tick % 18)) * 12.8f);
-		super.handleTelegram(String.format(Locale.US, "6216CF%04X", Integer.valueOf(vvtDuty1)).toCharArray());
-		super.handleTelegram(String.format(Locale.US, "62091E%04X", Integer.valueOf(vvtDuty2)).toCharArray());
-		super.handleTelegram(String.format(Locale.US, "6216CD%04X", Integer.valueOf(vvtAngle)).toCharArray());
-		super.handleTelegram("6216CE0004".toCharArray());
-		// IMT Intake Valve (toggles at higher simulated RPM) & VREF ~ 5.01 V (0xFFC0)
-		super.handleTelegram(((tick % 40) > 25 ? "62110310" : "62110300").toCharArray());
-		super.handleTelegram("621155FFC0".toCharArray());
-		// Supercharger IAT2 ~ 48 C (0x58) & Module DTC count
-		super.handleTelegram(String.format(Locale.US, "62123B%02X", Integer.valueOf(84 + (tick % 10))).toCharArray());
-		super.handleTelegram((demoCodesCleared ? "62020000" : "62020003").toCharArray());
 	}
 	
 	// switch to exit the demo thread
@@ -1880,22 +1488,13 @@ public class ElmProt
 				
 				setStatus(STAT.ECU_DETECT);
 				handleTelegram("SEARCHING...".toCharArray());
-				if (JaguarStypeSupport.isEnabled())
+				VehicleProfileHandler activeDemoHandler = VehicleProfileManager.getActiveHandler();
+				if (activeDemoHandler != null)
 				{
-					handleTelegram("486B104100BF9FA8919B".toCharArray());
-					handleTelegram("7E8064100000000".toCharArray());
-					handleTelegram("7E9074100000000".toCharArray());
-					handleTelegram("768074100000000".toCharArray());
-					handleTelegram("7CC074100000000".toCharArray());
-				}
-				else if (KiaVengaSupport.isEnabled())
-				{
-					handleTelegram("7E8064100BE3FA813".toCharArray());
-					handleTelegram("7E906410080000000".toCharArray());
-					handleTelegram("7D906410000000000".toCharArray());
-					handleTelegram("7DC06410000000000".toCharArray());
-					handleTelegram("7CE06410000000000".toCharArray());
-					handleTelegram("7DE06410000000000".toCharArray());
+					for (String detectFrame : activeDemoHandler.getDemoEcuDetectTelegrams())
+					{
+						handleTelegram(detectFrame.toCharArray());
+					}
 				}
 				else
 				{
@@ -1912,26 +1511,19 @@ public class ElmProt
 				
 				while (runDemo)
 				{
+					VehicleProfileHandler currentHandler = VehicleProfileManager.getActiveHandler();
 					switch (service)
 					{
 						// read any kinds of trouble codes
 						case OBD_SVC_READ_CODES:
 						case OBD_SVC_PENDINGCODES:
 						case OBD_SVC_PERMACODES:
-							if (JaguarStypeSupport.isEnabled())
+							if (currentHandler != null)
 							{
 								if (!demoCodesCleared && tCodes.isEmpty())
 								{
-									simulateJaguarDemoDtcs(JaguarStypeSupport.getActiveModule());
-								}
-								Thread.sleep(500);
-								break;
-							}
-							if (KiaVengaSupport.isEnabled())
-							{
-								if (!demoCodesCleared && tCodes.isEmpty())
-								{
-									simulateKiaDemoDtcs(KiaVengaSupport.getActiveModule());
+									currentHandler.emitDemoDtcs(
+											currentHandler.getActiveModule(), demoObdSink);
 								}
 								Thread.sleep(500);
 								break;
@@ -1973,16 +1565,11 @@ public class ElmProt
 									                        : "4%X%02X00%02X%02X%02X%02X",
 									service, pid, value, value, value, value).toCharArray());
 								if (service == OBD_SVC_DATA
-										&& JaguarStypeSupport.isEnabled()
+										&& currentHandler != null
 										&& (demoTick % 8 == 0))
 								{
-									simulateJaguarDemoMode22(demoTick / 8);
-								}
-								else if (service == OBD_SVC_DATA
-										&& KiaVengaSupport.isEnabled()
-										&& (demoTick % 8 == 0))
-								{
-									simulateKiaDemoExtended(demoTick / 8);
+									currentHandler.emitDemoLiveData(
+											demoTick / 8, demoCodesCleared, PidPvs, demoObdSink);
 								}
 								demoTick++;
 							}
@@ -2012,21 +1599,12 @@ public class ElmProt
 								handleTelegram("490054000000".toCharArray());
 							}
 							
-							if (JaguarStypeSupport.isEnabled())
+							if (currentHandler != null)
 							{
-								// send Jaguar S-Type VIN "SAJAC01P62FM45255"
-								handleTelegram("014".toCharArray());
-								handleTelegram("1:49020153414A41".toCharArray());
-								handleTelegram("2:433031503632".toCharArray());
-								handleTelegram("3:464D3435323535".toCharArray());
-							}
-							else if (KiaVengaSupport.isEnabled())
-							{
-								// send European KIA Venga (Nošovice) VIN "TMAEH812AAJ045123"
-								handleTelegram("014".toCharArray());
-								handleTelegram("1:490201544D4145".toCharArray());
-								handleTelegram("2:483831324141".toCharArray());
-								handleTelegram("3:4A303435313233".toCharArray());
+								for (String vinFrame : currentHandler.getDemoVinTelegrams())
+								{
+									handleTelegram(vinFrame.toCharArray());
+								}
 							}
 							else
 							{
@@ -2107,16 +1685,14 @@ public class ElmProt
 			this.service = service;
 			moduleScanInProgress = false;
 
-			// If we previously targeted a custom Jaguar module (CCM / ABS / TCM / etc.)
+			// If we previously targeted a custom ECU module (CCM / ABS / TCM / MDPS / etc.)
 			// and are now switching back to standard OBD services (Live Data, Freeze Frame, Veh Info),
 			// restore default ELM327 headers & protocol before starting the service!
+			VehicleModule activeMod = VehicleProfileManager.getActiveModule();
+			boolean nonEngineModSelected = (activeMod != null && !activeMod.isEngineObd());
 			if (customModuleBusActive && service != OBD_SVC_NONE && service != OBD_SVC_CAN_MONITOR)
 			{
-				boolean stayOnCustomModule = (service == OBD_SVC_READ_CODES)
-						&& ((JaguarStypeSupport.isEnabled()
-						     && JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD)
-						    || (KiaVengaSupport.isEnabled()
-						        && KiaVengaSupport.getActiveModule() != KiaVengaSupport.DiagModule.ENGINE_OBD));
+				boolean stayOnCustomModule = (service == OBD_SVC_READ_CODES) && nonEngineModSelected;
 				if (!stayOnCustomModule)
 				{
 					customModuleBusActive = false;
@@ -2149,35 +1725,18 @@ public class ElmProt
 				}
 			}
 
-			// If Jaguar or KIA mode is active and a non-engine module is currently selected on Fault Codes,
+			// If a custom brand profile is active and a non-engine module is selected on Fault Codes,
 			// delegate OBD_SVC_READ_CODES / OBD_SVC_CLEAR_CODES to the active vehicle module scanner.
-			if (clearLists
-					&& JaguarStypeSupport.isEnabled()
-					&& JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD)
+			if (clearLists && nonEngineModSelected)
 			{
 				if (service == OBD_SVC_READ_CODES)
 				{
-					scanJaguarModuleDtcs(JaguarStypeSupport.getActiveModule());
+					scanVehicleModuleDtcs(activeMod);
 					return;
 				}
 				if (service == OBD_SVC_CLEAR_CODES)
 				{
-					clearJaguarModuleDtcs(JaguarStypeSupport.getActiveModule());
-					return;
-				}
-			}
-			if (clearLists
-					&& KiaVengaSupport.isEnabled()
-					&& KiaVengaSupport.getActiveModule() != KiaVengaSupport.DiagModule.ENGINE_OBD)
-			{
-				if (service == OBD_SVC_READ_CODES)
-				{
-					scanKiaModuleDtcs(KiaVengaSupport.getActiveModule());
-					return;
-				}
-				if (service == OBD_SVC_CLEAR_CODES)
-				{
-					clearKiaModuleDtcs(KiaVengaSupport.getActiveModule());
+					clearVehicleModuleDtcs(activeMod);
 					return;
 				}
 			}

@@ -82,10 +82,13 @@ import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
-import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileHandler;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.ProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
@@ -1287,36 +1290,34 @@ public class MainActivity extends PluginManager
         View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
         View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
         View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
-        View chipKiaEng = mListView.findViewById(R.id.chip_preset_kia_engine);
-        View chipKiaChassis = mListView.findViewById(R.id.chip_preset_kia_chassis);
-        View chipKiaAll = mListView.findViewById(R.id.chip_preset_kia_all);
-        View chipJagTrans = mListView.findViewById(R.id.chip_preset_jaguar_trans);
-        View chipJagVvt = mListView.findViewById(R.id.chip_preset_jaguar_vvt);
-        View chipJagAll = mListView.findViewById(R.id.chip_preset_jaguar_all);
 
         if (chipAll != null) chipAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.ALL));
         if (chipFav != null) chipFav.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FAVORITES));
         if (chipStartup != null) chipStartup.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.STARTUP));
         if (chipFuel != null) chipFuel.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.FUEL));
         if (chipDriving != null) chipDriving.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.DRIVING));
-        if (chipKiaEng != null) chipKiaEng.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.KIA_ENGINE));
-        if (chipKiaChassis != null) chipKiaChassis.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.KIA_CHASSIS));
-        if (chipKiaAll != null) chipKiaAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.KIA_ALL));
-        if (chipJagTrans != null) chipJagTrans.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_TRANS));
-        if (chipJagVvt != null) chipJagVvt.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_VVT));
-        if (chipJagAll != null) chipJagAll.setOnClickListener(v -> selectPidPreset(PidPresetManager.Preset.JAGUAR_ALL));
 
-        View btnJagRescan = mListView.findViewById(R.id.btn_jaguar_rescan_module);
-        if (btnJagRescan != null)
+        for (VehicleUiProfile uiProfile : VehicleUiRegistry.getAllUiProfiles())
         {
-            btnJagRescan.setOnClickListener(v -> {
-                if (JaguarStypeSupport.isEnabled())
+            for (final int chipId : uiProfile.getPresetChipViewIds())
+            {
+                View chipView = mListView.findViewById(chipId);
+                final PidPresetManager.Preset chipPreset = uiProfile.resolvePresetForChipId(chipId);
+                if (chipView != null && chipPreset != null)
                 {
-                    selectAndScanJaguarModule(JaguarStypeSupport.getActiveModule());
+                    chipView.setOnClickListener(v -> selectPidPreset(chipPreset));
                 }
-                else if (KiaVengaSupport.isEnabled())
+            }
+        }
+
+        View btnVehicleRescan = mListView.findViewById(R.id.btn_vehicle_rescan_module);
+        if (btnVehicleRescan != null)
+        {
+            btnVehicleRescan.setOnClickListener(v -> {
+                VehicleProfileHandler active = VehicleProfileManager.getActiveHandler();
+                if (active != null)
                 {
-                    selectAndScanKiaModule(KiaVengaSupport.getActiveModule());
+                    selectAndScanVehicleModule(active.getActiveModule());
                 }
             });
         }
@@ -1355,8 +1356,7 @@ public class MainActivity extends PluginManager
             return;
         }
         PidPresetManager.Preset preset = mPidAdapter.getPreset();
-        JaguarStypeSupport.setJaguarPresetFocused(preset != null && preset.isJaguarPreset());
-        KiaVengaSupport.setKiaPresetFocused(preset != null && preset.isKiaPreset());
+        VehicleProfileManager.setBrandPresetFocused(VehicleUiRegistry.isActiveBrandPreset(preset));
         TreeSet<Integer> fixed = PidPresetManager.computeFixedPids(
                 preset,
                 ObdProt.PidPvs.values(),
@@ -1372,20 +1372,13 @@ public class MainActivity extends PluginManager
     {
         if (mListView == null || mPidAdapter == null) return;
         PidPresetManager.Preset p = mPidAdapter.getPreset();
-        boolean jagEnabled = JaguarStypeSupport.isEnabled();
-        boolean kiaEnabled = KiaVengaSupport.isEnabled();
+        VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
 
         View chipAll = mListView.findViewById(R.id.chip_preset_all);
         View chipFav = mListView.findViewById(R.id.chip_preset_fav);
         View chipStartup = mListView.findViewById(R.id.chip_preset_startup);
         View chipFuel = mListView.findViewById(R.id.chip_preset_fuel);
         View chipDriving = mListView.findViewById(R.id.chip_preset_driving);
-        View chipKiaEng = mListView.findViewById(R.id.chip_preset_kia_engine);
-        View chipKiaChassis = mListView.findViewById(R.id.chip_preset_kia_chassis);
-        View chipKiaAll = mListView.findViewById(R.id.chip_preset_kia_all);
-        View chipJagTrans = mListView.findViewById(R.id.chip_preset_jaguar_trans);
-        View chipJagVvt = mListView.findViewById(R.id.chip_preset_jaguar_vvt);
-        View chipJagAll = mListView.findViewById(R.id.chip_preset_jaguar_all);
 
         if (chipAll != null) chipAll.setSelected(p == PidPresetManager.Preset.ALL);
         if (chipFav != null) chipFav.setSelected(p == PidPresetManager.Preset.FAVORITES);
@@ -1393,36 +1386,18 @@ public class MainActivity extends PluginManager
         if (chipFuel != null) chipFuel.setSelected(p == PidPresetManager.Preset.FUEL);
         if (chipDriving != null) chipDriving.setSelected(p == PidPresetManager.Preset.DRIVING);
 
-        if (chipKiaEng != null)
+        for (VehicleUiProfile uiProfile : VehicleUiRegistry.getAllUiProfiles())
         {
-            chipKiaEng.setVisibility(kiaEnabled ? View.VISIBLE : View.GONE);
-            chipKiaEng.setSelected(kiaEnabled && p == PidPresetManager.Preset.KIA_ENGINE);
-        }
-        if (chipKiaChassis != null)
-        {
-            chipKiaChassis.setVisibility(kiaEnabled ? View.VISIBLE : View.GONE);
-            chipKiaChassis.setSelected(kiaEnabled && p == PidPresetManager.Preset.KIA_CHASSIS);
-        }
-        if (chipKiaAll != null)
-        {
-            chipKiaAll.setVisibility(kiaEnabled ? View.VISIBLE : View.GONE);
-            chipKiaAll.setSelected(kiaEnabled && p == PidPresetManager.Preset.KIA_ALL);
-        }
-
-        if (chipJagTrans != null)
-        {
-            chipJagTrans.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
-            chipJagTrans.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_TRANS);
-        }
-        if (chipJagVvt != null)
-        {
-            chipJagVvt.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
-            chipJagVvt.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_VVT);
-        }
-        if (chipJagAll != null)
-        {
-            chipJagAll.setVisibility(jagEnabled ? View.VISIBLE : View.GONE);
-            chipJagAll.setSelected(jagEnabled && p == PidPresetManager.Preset.JAGUAR_ALL);
+            boolean brandActive = (uiProfile == activeUi);
+            for (int chipId : uiProfile.getPresetChipViewIds())
+            {
+                View chipView = mListView.findViewById(chipId);
+                if (chipView != null)
+                {
+                    chipView.setVisibility(brandActive ? View.VISIBLE : View.GONE);
+                    chipView.setSelected(brandActive && p == uiProfile.resolvePresetForChipId(chipId));
+                }
+            }
         }
     }
 
@@ -1475,28 +1450,6 @@ public class MainActivity extends PluginManager
         }
     }
 
-    private static final int[] KIA_PRIORITY_NUMERIC_PIDS = new int[]{
-            KiaVengaSupport.PID_BLK_ECM_2101,
-            KiaVengaSupport.PID_BLK_TCM_21A0,
-            KiaVengaSupport.PID_BLK_ECM_2117,
-            KiaVengaSupport.PID_BLK_CRDI_2103,
-            KiaVengaSupport.PID_BLK_MDPS_2101,
-            KiaVengaSupport.PID_BLK_ABS_2101,
-            KiaVengaSupport.PID_BLK_TPMS_2106,
-            0x0C, 0x05, 0x0D
-    };
-
-    private static final int[] JAGUAR_PRIORITY_NUMERIC_PIDS = new int[]{
-            JaguarStypeSupport.PID_TRANS_FLUID_TEMP,
-            JaguarStypeSupport.PID_TRANS_OIL_TEMP_TOT,
-            JaguarStypeSupport.PID_TC_SLIP_RPM,
-            JaguarStypeSupport.PID_ENGINE_OIL_TEMP,
-            JaguarStypeSupport.PID_VVT_ANGLE,
-            JaguarStypeSupport.PID_VVT_DUTY_B1,
-            JaguarStypeSupport.PID_VVT_DUTY_B2,
-            0x0C, 0x05, 0x0D
-    };
-
     private static boolean isContinuousNumericPv(EcuDataPv pv)
     {
         if (pv == null || !(pv.get(EcuDataPv.FID_VALUE) instanceof Number))
@@ -1526,15 +1479,12 @@ public class MainActivity extends PluginManager
         ArrayList<Integer> chosen = new ArrayList<>(maxCount);
 
         int[] priorityPids = PRIORITY_NUMERIC_PIDS;
-        if (mPidAdapter != null && mPidAdapter.getPreset() != null)
+        if (mPidAdapter != null && VehicleUiRegistry.isActiveBrandPreset(mPidAdapter.getPreset()))
         {
-            if (JaguarStypeSupport.isEnabled() && mPidAdapter.getPreset().isJaguarPreset())
+            VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
+            if (activeUi != null)
             {
-                priorityPids = JAGUAR_PRIORITY_NUMERIC_PIDS;
-            }
-            else if (KiaVengaSupport.isEnabled() && mPidAdapter.getPreset().isKiaPreset())
-            {
-                priorityPids = KIA_PRIORITY_NUMERIC_PIDS;
+                priorityPids = activeUi.getPriorityNumericPids();
             }
         }
 
@@ -1595,8 +1545,8 @@ public class MainActivity extends PluginManager
         TextView btnProfile = findViewById(R.id.btn_vehicle_profile);
         if (btnProfile != null)
         {
-            boolean customProfile = JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled();
-            btnProfile.setText(getShortProfileLabel() + " ▾");
+            boolean customProfile = VehicleProfileManager.isCustomProfileActive();
+            btnProfile.setText(VehicleUiRegistry.getShortProfileLabel(this) + " ▾");
             btnProfile.setTextColor(ContextCompat.getColor(this,
                     customProfile ? R.color.accent_primary : R.color.text_primary));
         }
@@ -1847,8 +1797,8 @@ public class MainActivity extends PluginManager
 
         View codesToolbar = mListView.findViewById(R.id.codes_toolbar);
         View btnClearCodesBar = mListView.findViewById(R.id.btn_clear_codes_bar);
-        View jaguarModuleBar = mListView.findViewById(R.id.jaguar_module_bar);
-        View btnJaguarRescan = mListView.findViewById(R.id.btn_jaguar_rescan_module);
+        View vehicleModuleBar = mListView.findViewById(R.id.vehicle_module_bar);
+        View btnVehicleRescan = mListView.findViewById(R.id.btn_vehicle_rescan_module);
         if (codesToolbar != null)
         {
             boolean isCodesSvc = (obdService == ObdProt.OBD_SVC_READ_CODES
@@ -1861,110 +1811,19 @@ public class MainActivity extends PluginManager
                 btnClearCodesBar.setVisibility(liveCodesSession ? View.VISIBLE : View.GONE);
             }
             boolean showVehicleModules = liveCodesSession
-                    && (JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled());
-            if (jaguarModuleBar != null)
+                    && VehicleProfileManager.isCustomProfileActive();
+            if (vehicleModuleBar != null)
             {
-                jaguarModuleBar.setVisibility(showVehicleModules ? View.VISIBLE : View.GONE);
+                vehicleModuleBar.setVisibility(showVehicleModules ? View.VISIBLE : View.GONE);
             }
-            if (btnJaguarRescan != null)
+            if (btnVehicleRescan != null)
             {
-                btnJaguarRescan.setVisibility(showVehicleModules ? View.VISIBLE : View.GONE);
+                btnVehicleRescan.setVisibility(showVehicleModules ? View.VISIBLE : View.GONE);
             }
             if (showVehicleModules)
             {
                 rebuildVehicleModuleChips();
             }
-        }
-    }
-
-    private String getShortProfileLabel()
-    {
-        if (KiaVengaSupport.isEnabled())
-        {
-            switch (KiaVengaSupport.getProfile())
-            {
-                case VENGA_PETROL:
-                    return getString(R.string.vehicle_profile_short_kia_petrol);
-                case VENGA_DIESEL:
-                    return getString(R.string.vehicle_profile_short_kia_diesel);
-                case VENGA_AUTO:
-                default:
-                    return getString(R.string.vehicle_profile_short_kia);
-            }
-        }
-        switch (JaguarStypeSupport.getProfile())
-        {
-            case STYPE_X200:
-                return getString(R.string.vehicle_profile_short_jaguar_x200);
-            case STYPE_X202:
-                return getString(R.string.vehicle_profile_short_jaguar_x202);
-            case STYPE_AUTO:
-                return getString(R.string.vehicle_profile_short_jaguar);
-            case NONE:
-            default:
-                return getString(R.string.vehicle_profile_standard);
-        }
-    }
-
-    private String getModuleDisplayName(JaguarStypeSupport.DiagModule module)
-    {
-        if (module == null)
-        {
-            return getString(R.string.jaguar_mod_engine_obd);
-        }
-        switch (module)
-        {
-            case PCM_SCP:
-                return getString(R.string.jaguar_mod_pcm_scp);
-            case ECM_CAN:
-                return getString(R.string.jaguar_mod_ecm_can);
-            case TCM:
-                return getString(R.string.jaguar_mod_tcm);
-            case ABS_DSC:
-                return getString(R.string.jaguar_mod_abs);
-            case CCM:
-                return getString(R.string.jaguar_mod_ccm);
-            case IC_PATS:
-                return getString(R.string.jaguar_mod_ic);
-            case RCM:
-                return getString(R.string.jaguar_mod_rcm);
-            case EPB:
-                return getString(R.string.jaguar_mod_epb);
-            case ENGINE_OBD:
-            default:
-                return getString(R.string.jaguar_mod_engine_obd);
-        }
-    }
-
-    private String getKiaModuleDisplayName(KiaVengaSupport.DiagModule module)
-    {
-        if (module == null)
-        {
-            return getString(R.string.kia_mod_engine_obd);
-        }
-        switch (module)
-        {
-            case ECM:
-                return getString(R.string.kia_mod_ecm);
-            case TCM:
-                return getString(R.string.kia_mod_tcm);
-            case ABS_ESC:
-                return getString(R.string.kia_mod_abs);
-            case MDPS:
-                return getString(R.string.kia_mod_mdps);
-            case SRS_ACU:
-                return getString(R.string.kia_mod_srs);
-            case BCM:
-                return getString(R.string.kia_mod_bcm);
-            case CLU:
-                return getString(R.string.kia_mod_clu);
-            case FATC:
-                return getString(R.string.kia_mod_fatc);
-            case TPMS:
-                return getString(R.string.kia_mod_tpms);
-            case ENGINE_OBD:
-            default:
-                return getString(R.string.kia_mod_engine_obd);
         }
     }
 
@@ -2000,50 +1859,33 @@ public class MainActivity extends PluginManager
     private void rebuildVehicleModuleChips()
     {
         if (mListView == null) return;
-        LinearLayout container = mListView.findViewById(R.id.jaguar_module_chips_container);
+        LinearLayout container = mListView.findViewById(R.id.vehicle_module_chips_container);
         if (container == null) return;
 
         container.removeAllViews();
+        VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
+        if (activeHandler == null)
+        {
+            return;
+        }
         float density = getResources().getDisplayMetrics().density;
         int heightPx = Math.round(28f * density);
         int padHPx = Math.round(10f * density);
         int marginEndPx = Math.round(6f * density);
 
-        if (JaguarStypeSupport.isEnabled())
+        List<VehicleModule> modules = activeHandler.getAvailableModules();
+        VehicleModule activeMod = activeHandler.getActiveModule();
+        for (int i = 0; i < modules.size(); i++)
         {
-            List<JaguarStypeSupport.DiagModule> modules =
-                    JaguarStypeSupport.getAvailableModules(JaguarStypeSupport.getProfile());
-            JaguarStypeSupport.DiagModule active = JaguarStypeSupport.getActiveModule();
-            for (int i = 0; i < modules.size(); i++)
-            {
-                final JaguarStypeSupport.DiagModule mod = modules.get(i);
-                TextView chip = createModuleChipView(
-                        getModuleDisplayName(mod),
-                        mod == active,
-                        heightPx,
-                        padHPx,
-                        (i < modules.size() - 1) ? marginEndPx : 0);
-                chip.setOnClickListener(v -> selectAndScanJaguarModule(mod));
-                container.addView(chip);
-            }
-        }
-        else if (KiaVengaSupport.isEnabled())
-        {
-            List<KiaVengaSupport.DiagModule> modules =
-                    KiaVengaSupport.getAvailableModules(KiaVengaSupport.getProfile());
-            KiaVengaSupport.DiagModule active = KiaVengaSupport.getActiveModule();
-            for (int i = 0; i < modules.size(); i++)
-            {
-                final KiaVengaSupport.DiagModule mod = modules.get(i);
-                TextView chip = createModuleChipView(
-                        getKiaModuleDisplayName(mod),
-                        mod == active,
-                        heightPx,
-                        padHPx,
-                        (i < modules.size() - 1) ? marginEndPx : 0);
-                chip.setOnClickListener(v -> selectAndScanKiaModule(mod));
-                container.addView(chip);
-            }
+            final VehicleModule mod = modules.get(i);
+            TextView chip = createModuleChipView(
+                    VehicleUiRegistry.getModuleDisplayName(this, mod),
+                    mod == activeMod,
+                    heightPx,
+                    padHPx,
+                    (i < modules.size() - 1) ? marginEndPx : 0);
+            chip.setOnClickListener(v -> selectAndScanVehicleModule(mod));
+            container.addView(chip);
         }
     }
 
@@ -2076,37 +1918,19 @@ public class MainActivity extends PluginManager
         return chip;
     }
 
-    private void selectAndScanJaguarModule(JaguarStypeSupport.DiagModule module)
+    private void selectAndScanVehicleModule(VehicleModule module)
     {
-        if (!JaguarStypeSupport.isEnabled() || module == null) return;
+        VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
+        if (activeHandler == null || module == null) return;
         if (getMode() == MODE.OFFLINE || getMode() == MODE.FILE) return;
 
-        JaguarStypeSupport.setActiveModule(module);
+        activeHandler.setActiveModule(module);
         rebuildVehicleModuleChips();
-        String modLabel = getModuleDisplayName(module);
+        String modLabel = VehicleUiRegistry.getModuleDisplayName(this, module);
         Toast.makeText(this,
-                getString(R.string.jaguar_scanning_fmt, modLabel),
+                getString(R.string.vehicle_scanning_fmt, modLabel),
                 Toast.LENGTH_SHORT).show();
-        CommService.elm.scanJaguarModuleDtcs(module);
-        if (mDfcAdapter != null)
-        {
-            mDfcAdapter.setPvList(ObdProt.tCodes);
-        }
-        refreshDataListStats();
-    }
-
-    private void selectAndScanKiaModule(KiaVengaSupport.DiagModule module)
-    {
-        if (!KiaVengaSupport.isEnabled() || module == null) return;
-        if (getMode() == MODE.OFFLINE || getMode() == MODE.FILE) return;
-
-        KiaVengaSupport.setActiveModule(module);
-        rebuildVehicleModuleChips();
-        String modLabel = getKiaModuleDisplayName(module);
-        Toast.makeText(this,
-                getString(R.string.jaguar_scanning_fmt, modLabel),
-                Toast.LENGTH_SHORT).show();
-        CommService.elm.scanKiaModuleDtcs(module);
+        CommService.elm.scanVehicleModuleDtcs(module);
         if (mDfcAdapter != null)
         {
             mDfcAdapter.setPvList(ObdProt.tCodes);
@@ -2294,21 +2118,15 @@ public class MainActivity extends PluginManager
 
     private void copyFaultCodeReportToClipboard()
     {
-        boolean customProfile = JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled();
-        String profileLine = customProfile
-                ? getString(R.string.dtc_report_profile_fmt, getShortProfileLabel())
+        VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
+        String profileLine = activeHandler != null
+                ? getString(R.string.dtc_report_profile_fmt,
+                        VehicleUiRegistry.getShortProfileLabel(this))
                 : null;
-        String moduleLine = null;
-        if (JaguarStypeSupport.isEnabled())
-        {
-            moduleLine = getString(R.string.dtc_report_module_fmt,
-                    getModuleDisplayName(JaguarStypeSupport.getActiveModule()));
-        }
-        else if (KiaVengaSupport.isEnabled())
-        {
-            moduleLine = getString(R.string.dtc_report_module_fmt,
-                    getKiaModuleDisplayName(KiaVengaSupport.getActiveModule()));
-        }
+        String moduleLine = activeHandler != null
+                ? getString(R.string.dtc_report_module_fmt,
+                        VehicleUiRegistry.getModuleDisplayName(this, activeHandler.getActiveModule()))
+                : null;
 
         DiagnosticReportBuilder.Labels labels = new DiagnosticReportBuilder.Labels(
                 getString(R.string.dtc_report_title),
@@ -3070,12 +2888,11 @@ public class MainActivity extends PluginManager
         if (key == null || SettingsActivity.KEY_VEHICLE_PROFILE.equals(key))
         {
             String profVal = prefs.getString(SettingsActivity.KEY_VEHICLE_PROFILE, "standard");
-            JaguarStypeSupport.setProfileByKey(profVal, ObdProt.PidPvs);
-            KiaVengaSupport.setProfileByKey(profVal, ObdProt.PidPvs);
+            VehicleProfileManager.setProfileByKey(profVal, ObdProt.PidPvs);
             if (mPidAdapter != null && mPidAdapter.getPreset() != null)
             {
-                if ((!JaguarStypeSupport.isEnabled() && mPidAdapter.getPreset().isJaguarPreset())
-                        || (!KiaVengaSupport.isEnabled() && mPidAdapter.getPreset().isKiaPreset()))
+                PidPresetManager.Preset curPreset = mPidAdapter.getPreset();
+                if (curPreset.isBrandPreset() && !VehicleUiRegistry.isActiveBrandPreset(curPreset))
                 {
                     mPidAdapter.setPreset(PidPresetManager.Preset.ALL);
                 }
@@ -3368,15 +3185,10 @@ public class MainActivity extends PluginManager
 
     private static String describeEcuAddress(int addr)
     {
-        String jagDesc = JaguarStypeSupport.describeEcuAddress(addr);
-        if (!jagDesc.isEmpty())
+        String customDesc = VehicleProfileManager.describeEcuAddress(addr);
+        if (!customDesc.isEmpty())
         {
-            return jagDesc;
-        }
-        String kiaDesc = KiaVengaSupport.describeEcuAddress(addr);
-        if (!kiaDesc.isEmpty())
-        {
-            return kiaDesc;
+            return customDesc;
         }
         switch (addr)
         {
@@ -4153,38 +3965,23 @@ public class MainActivity extends PluginManager
 
     private void clearObdFaultCodes()
     {
-        final boolean isJaguarModule = JaguarStypeSupport.isEnabled()
-                && JaguarStypeSupport.getActiveModule() != JaguarStypeSupport.DiagModule.ENGINE_OBD;
-        final boolean isKiaModule = KiaVengaSupport.isEnabled()
-                && KiaVengaSupport.getActiveModule() != KiaVengaSupport.DiagModule.ENGINE_OBD;
-        final JaguarStypeSupport.DiagModule targetJagMod = JaguarStypeSupport.getActiveModule();
-        final KiaVengaSupport.DiagModule targetKiaMod = KiaVengaSupport.getActiveModule();
-        String msg;
-        if (isJaguarModule)
-        {
-            msg = getString(R.string.jaguar_clear_module_fmt, getModuleDisplayName(targetJagMod));
-        }
-        else if (isKiaModule)
-        {
-            msg = getString(R.string.jaguar_clear_module_fmt, getKiaModuleDisplayName(targetKiaMod));
-        }
-        else
-        {
-            msg = getString(R.string.obd_clear_info);
-        }
+        final VehicleProfileHandler activeHandler = VehicleProfileManager.getActiveHandler();
+        final VehicleModule targetMod = activeHandler != null
+                ? activeHandler.getActiveModule() : null;
+        final boolean isDirectModule = targetMod != null && !targetMod.isStandardEngineObd();
+        String msg = isDirectModule
+                ? getString(R.string.vehicle_clear_module_fmt,
+                        VehicleUiRegistry.getModuleDisplayName(this, targetMod))
+                : getString(R.string.obd_clear_info);
 
         new AlertDialog.Builder(this)
                 .setIcon(android.R.drawable.ic_dialog_info)
                 .setTitle(R.string.obd_clearcodes)
                 .setMessage(msg)
                 .setPositiveButton(android.R.string.yes, (dialog, which) -> {
-                    if (isJaguarModule)
+                    if (isDirectModule)
                     {
-                        CommService.elm.clearJaguarModuleDtcs(targetJagMod);
-                    }
-                    else if (isKiaModule)
-                    {
-                        CommService.elm.clearKiaModuleDtcs(targetKiaMod);
+                        CommService.elm.clearVehicleModuleDtcs(targetMod);
                     }
                     else
                     {

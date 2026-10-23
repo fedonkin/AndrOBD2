@@ -29,9 +29,8 @@ import android.widget.TextView;
 import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
-import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
 
@@ -110,12 +109,12 @@ public class DfcItemAdapter extends ObdItemAdapter
 		{
 		}
 
-		if (JaguarStypeSupport.isSystemPassCode(codeText))
+		if (VehicleProfileManager.isSystemPassCode(codeText))
 		{
 			ivIcon.setImageResource(R.drawable.ic_info);
 			accentColor = ContextCompat.getColor(getContext(), R.color.status_online);
 			statusRes = R.string.dtc_status_pass;
-		} else if (JaguarStypeSupport.isReadinessInfoCode(codeText))
+		} else if (VehicleProfileManager.isReadinessInfoCode(codeText))
 		{
 			ivIcon.setImageResource(R.drawable.ic_info);
 			accentColor = ContextCompat.getColor(getContext(), R.color.status_demo);
@@ -129,8 +128,8 @@ public class DfcItemAdapter extends ObdItemAdapter
 		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
 		if (tvSublabel != null)
 		{
-			Object modObj = (JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled())
-					? currPv.get(JaguarStypeSupport.CODE_FIELD_MODULE)
+			Object modObj = VehicleProfileManager.isCustomProfileActive()
+					? currPv.get(VehicleProfileManager.CODE_FIELD_MODULE)
 					: null;
 			String hint = getContext().getString(R.string.long_press_dfc_hint);
 			if (modObj != null && !String.valueOf(modObj).trim().isEmpty())

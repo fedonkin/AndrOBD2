@@ -759,9 +759,9 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <!-- Jaguar S-Type Multi-Module Selector (strictly hidden unless Jaguar S-Type is selected) -->
+            <!-- Vehicle Multi-Module Selector (strictly hidden unless a custom vehicle profile is selected) -->
             <HorizontalScrollView
-                android:id="@+id/jaguar_module_bar"
+                android:id="@+id/vehicle_module_bar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="6dp"
@@ -769,7 +769,7 @@
                 android:visibility="gone">
 
                 <LinearLayout
-                    android:id="@+id/jaguar_module_chips_container"
+                    android:id="@+id/vehicle_module_chips_container"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal" />
@@ -782,7 +782,7 @@
                 android:orientation="horizontal">
 
                 <TextView
-                    android:id="@+id/btn_jaguar_rescan_module"
+                    android:id="@+id/btn_vehicle_rescan_module"
                     android:layout_width="wrap_content"
                     android:layout_height="34dp"
                     android:layout_marginEnd="6dp"
@@ -794,7 +794,7 @@
                     android:maxLines="1"
                     android:paddingStart="10dp"
                     android:paddingEnd="10dp"
-                    android:text="@string/jaguar_scan_module"
+                    android:text="@string/vehicle_scan_module"
                     android:textColor="@color/text_primary"
                     android:textSize="11.5sp"
                     android:textStyle="bold"

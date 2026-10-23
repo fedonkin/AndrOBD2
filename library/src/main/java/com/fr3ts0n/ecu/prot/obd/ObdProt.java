@@ -28,6 +28,8 @@ import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.ObdCodeItem;
 import com.fr3ts0n.ecu.ObdPid;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.prot.ProtoHeader;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
@@ -522,15 +524,13 @@ public class ObdProt extends ProtoHeader
                 }
             }
         }
-        JaguarStypeSupport.setFixedPidSelection(pidCodes);
-        KiaVengaSupport.setFixedPidSelection(pidCodes);
+        VehicleProfileManager.setFixedPidSelection(pidCodes);
     }
 
     public static synchronized void resetFixedPid()
     {
         fixedPids.clear();
-        JaguarStypeSupport.clearFixedPidSelection();
-        KiaVengaSupport.clearFixedPidSelection();
+        VehicleProfileManager.clearFixedPidSelection();
     }
 
     /**
@@ -585,7 +585,7 @@ public class ObdProt extends ProtoHeader
         int result = 0;
         int msgPid;
 
-        if ((JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled())
+        if (VehicleProfileManager.isCustomProfileActive()
                 && buffer != null && buffer.length == 2)
         {
             String shortHex = new String(buffer);
@@ -615,9 +615,10 @@ public class ObdProt extends ProtoHeader
                     int svc = (Integer) getParamValue(ID_NR_SVC, buffer);
                     // get NRC code
                     int nrcCode = (Integer) getParamValue(ID_NR_CODE, buffer);
-                    // Non-destructive handling for optional Jaguar S-Type Mode 22 & module services
-                    if (JaguarStypeSupport.isEnabled()
-                            && (svc == OBD_SVC_EXT_DATA
+                    // Non-destructive handling for optional brand profile Mode 21/22 & module services
+                    if (VehicleProfileManager.isCustomProfileActive()
+                            && (svc == OBD_SVC_KWP_DATA
+                                || svc == OBD_SVC_EXT_DATA
                                 || svc == OBD_SVC_MOD_CODES_13
                                 || svc == OBD_SVC_MOD_CODES_18
                                 || svc == OBD_SVC_MOD_CODES_19
@@ -626,26 +627,9 @@ public class ObdProt extends ProtoHeader
                     {
                         if (nrcCode != NRC.RCRRP.code)
                         {
-                            JaguarStypeSupport.onOptionalCommandFailed(svc, nrcCode, lastTxMsg);
+                            VehicleProfileManager.onOptionalCommandFailed(svc, nrcCode, lastTxMsg);
                         }
-                        log.fine(String.format("Optional Jaguar service 0x%02X NRC 0x%02X (%s)",
-                                svc, nrcCode, lastTxMsg));
-                        return result;
-                    }
-                    // Non-destructive handling for optional KIA Venga Mode 21/22 & module services
-                    if (KiaVengaSupport.isEnabled()
-                            && (svc == OBD_SVC_KWP_DATA
-                                || svc == OBD_SVC_EXT_DATA
-                                || svc == OBD_SVC_MOD_CODES_18
-                                || svc == OBD_SVC_MOD_CODES_19
-                                || svc == OBD_SVC_DIAG_SESSION
-                                || svc == OBD_SVC_MOD_CLEAR_14))
-                    {
-                        if (nrcCode != NRC.RCRRP.code)
-                        {
-                            KiaVengaSupport.onOptionalCommandFailed(svc, nrcCode, lastTxMsg);
-                        }
-                        log.fine(String.format("Optional KIA service 0x%02X NRC 0x%02X (%s)",
+                        log.fine(String.format("Optional profile service 0x%02X NRC 0x%02X (%s)",
                                 svc, nrcCode, lastTxMsg));
                         return result;
                     }
@@ -836,21 +820,10 @@ public class ObdProt extends ProtoHeader
                                 log.fine(String.format("+DFC: %04x: %s", key, code.toString()));
                                 // Remember received message service to know code status
                                 code.put(EcuCodeItem.FID_STATUS, Integer.valueOf(msgService));
-                                if (JaguarStypeSupport.isEnabled())
+                                VehicleModule mod = VehicleProfileManager.getActiveModule();
+                                if (mod != null && !mod.isEngineObd())
                                 {
-                                    JaguarStypeSupport.DiagModule mod = JaguarStypeSupport.getActiveModule();
-                                    if (mod != null && mod != JaguarStypeSupport.DiagModule.ENGINE_OBD)
-                                    {
-                                        code.put(JaguarStypeSupport.CODE_FIELD_MODULE, mod.shortTag);
-                                    }
-                                }
-                                else if (KiaVengaSupport.isEnabled())
-                                {
-                                    KiaVengaSupport.DiagModule mod = KiaVengaSupport.getActiveModule();
-                                    if (mod != null && mod != KiaVengaSupport.DiagModule.ENGINE_OBD)
-                                    {
-                                        code.put(KiaVengaSupport.CODE_FIELD_MODULE, mod.shortTag);
-                                    }
+                                    code.put(VehicleProfileManager.CODE_FIELD_MODULE, mod.getShortTag());
                                 }
                                 tCodes.remove(Integer.valueOf(0));
                                 tCodes.put(key, code);
@@ -875,29 +848,25 @@ public class ObdProt extends ProtoHeader
                     case OBD_SVC_MOD_CLEAR_14:
                         break;
 
-                    // KIA Venga KWP2000-on-CAN Mode 0x21 extended response (61 XX <data...>)
+                    // KWP2000-on-CAN Mode 0x21 extended response (61 XX <data...>)
                     case OBD_SVC_KWP_DATA:
-                        if (KiaVengaSupport.isEnabled() && buffer.length >= 6)
+                        if (VehicleProfileManager.isCustomProfileActive() && buffer.length >= 6)
                         {
                             int localId = Integer.parseInt(new String(buffer, 2, 2), 16);
                             char[] payloadBytes = hexToBytes(new String(buffer, 4, buffer.length - 4));
-                            KiaVengaSupport.onExtendedResponse(OBD_SVC_KWP_DATA, localId, payloadBytes, PidPvs);
+                            VehicleProfileManager.onExtendedResponse(
+                                    null, OBD_SVC_KWP_DATA, localId, payloadBytes, PidPvs);
                         }
                         break;
 
                     // Extended Mode 0x22 PID response (62 XX XX <data...>)
                     case OBD_SVC_EXT_DATA:
-                        if (JaguarStypeSupport.isEnabled() && buffer.length >= 8)
+                        if (VehicleProfileManager.isCustomProfileActive() && buffer.length >= 8)
                         {
                             int pid16 = Integer.parseInt(new String(buffer, 2, 4), 16);
                             char[] payloadBytes = hexToBytes(new String(buffer, 6, buffer.length - 6));
-                            JaguarStypeSupport.onMode22Response(pid16, payloadBytes, PidPvs);
-                        }
-                        else if (KiaVengaSupport.isEnabled() && buffer.length >= 8)
-                        {
-                            int pid16 = Integer.parseInt(new String(buffer, 2, 4), 16);
-                            char[] payloadBytes = hexToBytes(new String(buffer, 6, buffer.length - 6));
-                            KiaVengaSupport.onExtendedResponse(OBD_SVC_EXT_DATA, pid16, payloadBytes, PidPvs);
+                            VehicleProfileManager.onExtendedResponse(
+                                    null, OBD_SVC_EXT_DATA, pid16, payloadBytes, PidPvs);
                         }
                         break;
 
@@ -905,22 +874,9 @@ public class ObdProt extends ProtoHeader
                     case OBD_SVC_MOD_CODES_13:
                     case OBD_SVC_MOD_CODES_18:
                     case OBD_SVC_MOD_CODES_19:
-                        if (JaguarStypeSupport.isEnabled())
+                        if (VehicleProfileManager.isCustomProfileActive())
                         {
-                            int added = JaguarStypeSupport.parseModuleDtcResponse(
-                                    msgService, buffer, knownCodes, tCodes);
-                            if (added > 0)
-                            {
-                                setNumCodes(this.numCodes + added);
-                            } else if (tCodes.isEmpty())
-                            {
-                                tCodes.put(0, new ObdCodeItem(0, Messages.getString(
-                                        "no.trouble.codes.set")));
-                            }
-                        }
-                        else if (KiaVengaSupport.isEnabled())
-                        {
-                            int added = KiaVengaSupport.parseModuleDtcResponse(
+                            int added = VehicleProfileManager.parseModuleDtcResponse(
                                     msgService, buffer, knownCodes, tCodes);
                             if (added > 0)
                             {
@@ -953,7 +909,7 @@ public class ObdProt extends ProtoHeader
     {
         // remember last sent message
         lastTxMsg = new String(buffer);
-        KiaVengaSupport.notifyTxCommand(lastTxMsg);
+        VehicleProfileManager.notifyTxCommand(lastTxMsg);
         super.sendTelegram(buffer);
     }
 
@@ -1080,7 +1036,7 @@ public class ObdProt extends ProtoHeader
                     numCodes = 0;
                     cmdStack.clear();
                     // Push onto LIFO cmdStack so pop() executes 03 -> 07 -> 0A in forward order
-                    if (!JaguarStypeSupport.isEnabled())
+                    if (VehicleProfileManager.supportsPermanentDtcMode0A())
                     {
                         cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
                     }

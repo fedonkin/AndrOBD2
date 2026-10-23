@@ -2,9 +2,8 @@ package com.fr3ts0n.ecu.gui.androbd;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataPv;
-import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
-import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
 import java.text.SimpleDateFormat;
@@ -163,8 +162,8 @@ public class DiagnosticReportBuilder
                 String code = codeObj != null ? String.valueOf(codeObj).trim() : "---";
                 String desc = descObj != null ? String.valueOf(descObj).trim() : "";
                 String status = resolveStatusText(code, item.get(EcuCodeItem.FID_STATUS), labels);
-                Object modObj = (JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled())
-                        ? item.get(JaguarStypeSupport.CODE_FIELD_MODULE)
+                Object modObj = VehicleProfileManager.isCustomProfileActive()
+                        ? item.get(VehicleProfileManager.CODE_FIELD_MODULE)
                         : null;
                 String modPrefix = (modObj != null && !String.valueOf(modObj).trim().isEmpty())
                         ? (String.valueOf(modObj).trim() + " · ")
@@ -191,11 +190,11 @@ public class DiagnosticReportBuilder
 
     private static String resolveStatusText(String code, Object statusField, Labels labels)
     {
-        if (JaguarStypeSupport.isSystemPassCode(code) && labels.statusPass != null)
+        if (VehicleProfileManager.isSystemPassCode(code) && labels.statusPass != null)
         {
             return labels.statusPass;
         }
-        if (JaguarStypeSupport.isReadinessInfoCode(code) && labels.statusReadiness != null)
+        if (VehicleProfileManager.isReadinessInfoCode(code) && labels.statusReadiness != null)
         {
             return labels.statusReadiness;
         }
@@ -270,8 +269,7 @@ public class DiagnosticReportBuilder
             EcuDataPv pv = (EcuDataPv) obj;
             int pid = pv.getAsInt(EcuDataPv.FID_PID);
             boolean includePid = SNAPSHOT_CONTEXT_PIDS.contains(pid)
-                    || (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pid))
-                    || (KiaVengaSupport.isEnabled() && KiaVengaSupport.isKiaExtendedPid(pid));
+                    || VehicleProfileManager.ownsExtendedPid(pid);
             if (includePid && pv.get(EcuDataPv.FID_VALUE) != null)
             {
                 matching.add(pv);
