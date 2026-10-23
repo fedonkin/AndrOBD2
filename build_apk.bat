@@ -9,7 +9,7 @@ rem    build_apk.bat release         - сборка оптимизированн
 rem    build_apk.bat clean           - полная пересборка с очисткой кэша проекта
 rem    build_apk.bat test            - запуск модульных тестов + сборка APK
 rem    build_apk.bat install         - сборка и установка на телефон через ADB
-rem    build_apk.bat --no-pause      - без ожидания нажатия клавиши в конце
+rem    build_apk.bat --no-pause      - завершить скрипт сразу (без удержания окна)
 rem ============================================================================
 
 set "ORIG_CP="
@@ -17,19 +17,19 @@ for /f "tokens=2 delims=:." %%A in ('chcp') do set "ORIG_CP=%%A"
 if defined ORIG_CP set "ORIG_CP=!ORIG_CP: =!"
 chcp 65001 >nul 2>&1
 
-set "PROJECT_DIR=%~dp0"
-pushd "%PROJECT_DIR%" >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Не удалось перейти в каталог проекта: "%PROJECT_DIR%"
-    exit /b 1
-)
-
 set "BUILD_TYPE=debug"
 set "CLEAN_TASK="
 set "TEST_TASK="
 set "DO_INSTALL=0"
 set "NO_PAUSE=0"
 if /i "%CI%"=="true" set "NO_PAUSE=1"
+
+set "PROJECT_DIR=%~dp0"
+pushd "%PROJECT_DIR%" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Не удалось перейти в каталог проекта: "%PROJECT_DIR%"
+    goto :fail
+)
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -40,7 +40,7 @@ if /i "%~1"=="debug" (
 ) else if /i "%~1"=="clean" (
     set "CLEAN_TASK=clean"
 ) else if /i "%~1"=="test" (
-    set "TEST_TASK=:androbd:testDebugUnitTest"
+    set "TEST_TASK=:library:test :androbd:testDebugUnitTest"
 ) else if /i "%~1"=="install" (
     set "DO_INSTALL=1"
 ) else if /i "%~1"=="--no-pause" (
@@ -227,7 +227,7 @@ echo   release     Сборка сжатого Release APK ^(R8/ProGuard^) с а
 echo   clean       Очистка предыдущих артефактов сборки перед компиляцией
 echo   test        Запуск unit-тестов перед сборкой APK
 echo   install     Автоматическая установка готового APK на телефон через adb install -r
-echo   --no-pause  Не ожидать нажатия клавиши по завершении работы скрипта
+echo   --no-pause  Завершить скрипт сразу без удержания окна открытым
 set "EXIT_CODE=0"
 goto :finish
 
@@ -241,10 +241,16 @@ goto :finish
 
 :finish
 popd >nul 2>&1
-if "!NO_PAUSE!"=="0" (
-    echo.
-    pause
-)
+if "!NO_PAUSE!"=="1" goto :exit_now
+echo.
+echo Окно не закроется от нажатия клавиш — для выхода закройте окно крестиком [X].
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Console]::TreatControlCAsInput = $true } catch {}; while ($true) { Start-Sleep -Seconds 3600 }" >nul 2>&1
+
+:wait_window_close
+timeout /t 3600 /nobreak >nul 2>&1
+goto :wait_window_close
+
+:exit_now
 if defined ORIG_CP chcp !ORIG_CP! >nul 2>&1
 endlocal & exit /b %EXIT_CODE%
 
