@@ -50,7 +50,8 @@ public class ColorAdapter extends ArrayAdapter<Integer>
 
     public static int getItemColor(int id)
     {
-        return colors[Math.floorMod(id, colors.length)];
+        int n = colors.length;
+        return colors[((id % n) + n) % n];
     }
 
     public static int getItemColor(EcuDataPv currPv)

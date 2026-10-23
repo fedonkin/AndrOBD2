@@ -162,4 +162,60 @@ public class LiveDataRecorderTest
         assertTrue(lines[2].endsWith(";0;MARK_1;900"));
         assertTrue(lines[3].endsWith(";1;MARK_2;2400"));
     }
+
+    @Test
+    public void compactsBitfieldsAndSeparatesConstantFromDynamicColumns()
+    {
+        assertEquals("Доступно", LiveDataRecorder.compactBitfieldValue("(*)  Доступно\n(  )  Неполный"));
+        assertEquals("B1S1, B1S2, B2S1, B2S2",
+                LiveDataRecorder.compactBitfieldValue("(*)  B1S1 (*)  B1S2 (  )  B1S3 (*)  B2S1 (*)  B2S2"));
+        assertEquals("—",
+                LiveDataRecorder.compactBitfieldValue("(  )  Открытый контур (  )  Замкнутый контур"));
+
+        final List<EcuDataPv> liveItems = new ArrayList<>();
+        EcuDataPv mil = makePv(0x01, "MIL", "Состояние индикатора неисправности", "Выкл", "");
+        EcuDataPv misfire = makePv(0x01, "MISF", "Статус пропуска зажигания", "(*)  Доступно (  )  Неполный", "");
+        misfire.put(EcuDataPv.FID_OFS, 1);
+        EcuDataPv egr = makePv(0x01, "EGR", "Состояние системы рециркуляции выхлопных газов", "(  )  Неполный (  )  Доступно", "");
+        egr.put(EcuDataPv.FID_OFS, 2);
+        EcuDataPv ect = makePv(0x05, "ECT", "Температура охлаждающей жидкости", "17,0", "°C");
+        EcuDataPv thr = makePv(0x11, "THR", "Положение дроссельной заслонки", "11,0", "%");
+        EcuDataPv obd = makePv(0x1C, "OBD", "ODB соотвествует", "EOBD (Европа)", "");
+
+        liveItems.add(mil);
+        liveItems.add(misfire);
+        liveItems.add(egr);
+        liveItems.add(ect);
+        liveItems.add(thr);
+        liveItems.add(obd);
+
+        LiveDataRecorder recorder = new LiveDataRecorder(new LiveDataRecorder.DataSource()
+        {
+            @Override
+            public Collection<?> getPidItems() { return liveItems; }
+            @Override
+            public Collection<?> getPluginItems() { return Collections.emptyList(); }
+        });
+
+        long t0 = 100_000L;
+        recorder.startForTest(t0);
+        assertTrue(recorder.captureSnapshotAt(t0));
+        thr.put(EcuDataPv.FID_VALUE, "11,4");
+        assertTrue(recorder.captureSnapshotAt(t0 + 1000L));
+        recorder.stopForTest(t0 + 1000L);
+
+        String formatted = recorder.buildFormattedLog("Время [s]", "Сек", "Метка");
+        assertTrue(formatted.contains("1 changing, 5 constant"));
+        assertTrue(formatted.contains("[Постоянные параметры — без изменений (5)]"));
+        assertTrue(formatted.contains("- Стандарт OBD: EOBD (Европа)"));
+        assertTrue(formatted.contains("- Температура охлаждающей жидкости: 17,0 °C"));
+        assertTrue(formatted.contains("Мониторы [Доступно]: Пропуска зажигания"));
+        assertTrue(formatted.contains("Не активны / Н/Д: Рециркуляции выхлопных газов"));
+        assertTrue(formatted.contains("\nВремя;Сек;Дроссель [%]\n"));
+        assertFalse(formatted.contains("(  )"));
+
+        String csv = recorder.buildCsvTable("Время [s]", "Сек", "Метка");
+        assertTrue(csv.contains("Время;Сек;"));
+        assertFalse(csv.contains("(  )"));
+    }
 }

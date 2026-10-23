@@ -217,9 +217,13 @@ public class DiagnosticReportBuilder
         Collections.sort(matching, Comparator.comparingInt(a -> a.getAsInt(EcuDataPv.FID_PID)));
         for (EcuDataPv pv : matching)
         {
-            String desc = String.valueOf(pv.get(EcuDataPv.FID_DESCRIPT)).trim();
-            String val = LiveDataRecorder.formatPvValue(pv, pv.get(EcuDataPv.FID_VALUE));
+            int pid = pv.getAsInt(EcuDataPv.FID_PID);
+            Object mnemObj = pv.get(EcuDataPv.FID_MNEMONIC);
+            String mnem = mnemObj != null ? String.valueOf(mnemObj) : "";
             String units = pv.getUnits();
+            String rawDesc = String.valueOf(pv.get(EcuDataPv.FID_DESCRIPT)).trim();
+            String desc = LiveDataRecorder.cleanDescription(pid, mnem, rawDesc, units);
+            String val = LiveDataRecorder.formatPvValue(pv, pv.get(EcuDataPv.FID_VALUE));
             if (units != null && !units.trim().isEmpty())
             {
                 out.add(desc + ": " + val + " " + units.trim());

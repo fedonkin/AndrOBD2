@@ -35,9 +35,11 @@ import android.widget.TextView;
 import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.androbd.plugin.mgr.PluginManager;
+import com.fr3ts0n.ecu.BitmapConversion;
 import com.fr3ts0n.ecu.Conversion;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.HashConversion;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
@@ -354,11 +356,18 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         holder.tvValue.setVisibility(View.VISIBLE);
         holder.tvValue.setTextColor(ContextCompat.getColor(getContext(), R.color.text_primary));
 
-        String description = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
-        holder.tvDescr.setText(description);
+        String units = (currPv instanceof EcuDataPv)
+                ? ((EcuDataPv) currPv).getUnits()
+                : (currPv.get(EcuDataPv.FID_UNITS) != null ? String.valueOf(currPv.get(EcuDataPv.FID_UNITS)) : "");
+        boolean hasUnits = units != null && !units.trim().isEmpty();
 
         Object mnemonicObj = currPv.get(EcuDataPv.FID_MNEMONIC);
         String mnemonic = mnemonicObj != null ? String.valueOf(mnemonicObj) : "";
+        int pidNum = (currPv instanceof EcuDataPv) ? ((EcuDataPv) currPv).getAsInt(EcuDataPv.FID_PID) : 0;
+
+        String rawDescription = String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT));
+        String description = LiveDataRecorder.cleanDescription(pidNum, mnemonic, rawDescription, units);
+        holder.tvDescr.setText(description);
         if (!mnemonic.isEmpty() && !mnemonic.equalsIgnoreCase(description))
         {
             holder.tvSublabel.setText(mnemonic);
@@ -378,12 +387,14 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 : ColorAdapter.getItemColor(position);
         tintViewBackground(holder.itemAccent, pidColor);
 
+        boolean isDiscreteConversion = false;
         try
         {
             if (cnvObj instanceof Conversion[]
                     && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] != null)
             {
                 Conversion cnv = ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem];
+                isDiscreteConversion = (cnv instanceof BitmapConversion || cnv instanceof HashConversion);
                 fmtText = cnv.physToPhysFmtString((Number) colVal,
                         (String) currPv.get(EcuDataPv.FID_FORMAT));
             } else
@@ -391,7 +402,10 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 fmtText = colVal != null ? String.valueOf(colVal) : "—";
             }
 
-            if (min != null
+            fmtText = LiveDataRecorder.compactBitfieldValue(fmtText);
+
+            if (!isDiscreteConversion
+                    && min != null
                     && max != null
                     && colVal instanceof Number
                     && max.doubleValue() > min.doubleValue())
@@ -412,18 +426,13 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             }
         } catch (Exception ex)
         {
-            fmtText = colVal != null ? String.valueOf(colVal) : "—";
+            fmtText = colVal != null ? LiveDataRecorder.compactBitfieldValue(String.valueOf(colVal)) : "—";
             holder.progressBar.setVisibility(ProgressBar.GONE);
         }
 
-        String units = (currPv instanceof EcuDataPv)
-                ? ((EcuDataPv) currPv).getUnits()
-                : (currPv.get(EcuDataPv.FID_UNITS) != null ? String.valueOf(currPv.get(EcuDataPv.FID_UNITS)) : "");
-        boolean hasUnits = units != null && !units.trim().isEmpty();
-
-        boolean useWideTextRow = !(colVal instanceof Number)
+        boolean useWideTextRow = (!(colVal instanceof Number) || isDiscreteConversion)
                 && fmtText != null
-                && fmtText.length() > 10;
+                && fmtText.length() > 12;
 
         if (useWideTextRow)
         {

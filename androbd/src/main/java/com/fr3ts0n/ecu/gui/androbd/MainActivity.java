@@ -1832,6 +1832,19 @@ public class MainActivity extends PluginManager
         Toast.makeText(this, R.string.live_rec_started_toast, Toast.LENGTH_SHORT).show();
     }
 
+    private LiveDataRecorder.ExportLabels buildRecorderExportLabels()
+    {
+        return new LiveDataRecorder.ExportLabels(
+                getString(R.string.live_rec_col_time),
+                getString(R.string.live_rec_col_sec),
+                getString(R.string.live_rec_col_mark),
+                getString(R.string.live_rec_section_constant_fmt),
+                getString(R.string.live_rec_section_dynamic_fmt),
+                getString(R.string.live_rec_monitors_prefix_fmt),
+                getString(R.string.live_rec_inactive_group),
+                getString(R.string.live_rec_all_constant_note));
+    }
+
     private void stopLiveRecording(boolean showSummaryDialog)
     {
         boolean wasRecording = liveDataRecorder.isRecording();
@@ -1854,11 +1867,11 @@ public class MainActivity extends PluginManager
             return;
         }
 
-        final String exportText = liveDataRecorder.buildFormattedLog(
-                getString(R.string.time),
+        final String csvText = liveDataRecorder.buildCsvTable(
+                getString(R.string.live_rec_col_time),
                 getString(R.string.live_rec_col_sec),
                 getString(R.string.live_rec_col_mark));
-        saveRecordedCsvInBackground(exportText);
+        saveRecordedCsvInBackground(csvText);
 
         if (showSummaryDialog && !isFinishing())
         {
@@ -1932,10 +1945,7 @@ public class MainActivity extends PluginManager
             return;
         }
 
-        String fullLog = liveDataRecorder.buildFormattedLog(
-                getString(R.string.time),
-                getString(R.string.live_rec_col_sec),
-                getString(R.string.live_rec_col_mark));
+        String fullLog = liveDataRecorder.buildFormattedLog(buildRecorderExportLabels());
         if (fullLog.isEmpty())
         {
             return;
@@ -1989,10 +1999,7 @@ public class MainActivity extends PluginManager
     {
         if (!liveDataRecorder.hasSamples()) return;
 
-        String fullLog = liveDataRecorder.buildFormattedLog(
-                getString(R.string.time),
-                getString(R.string.live_rec_col_sec),
-                getString(R.string.live_rec_col_mark));
+        String fullLog = liveDataRecorder.buildFormattedLog(buildRecorderExportLabels());
         Intent sendIntent = new Intent(Intent.ACTION_SEND);
         String savedPath = liveDataRecorder.getLastSavedFilePath();
         if (savedPath != null && new File(savedPath).exists())

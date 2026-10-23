@@ -261,7 +261,13 @@
     <string name="live_rec_done_summary_fmt">Длительность: %1$s\nСнимков (шаг 1 сек): %2$d\nЗаписано параметров: %3$d\n\n%4$s</string>
     <string name="live_rec_copy_all">Скопировать всю запись</string>
     <string name="live_rec_copied_toast_fmt">Вся запись скопирована в буфер обмена (%1$d строк, %2$d парам.)</string>
+    <string name="live_rec_col_time">Время</string>
     <string name="live_rec_col_sec">Сек</string>
+    <string name="live_rec_section_constant_fmt">[Постоянные параметры — без изменений (%d)]</string>
+    <string name="live_rec_section_dynamic_fmt">[Динамика по секундам — изменявшиеся параметры (%d)]</string>
+    <string name="live_rec_monitors_prefix_fmt">Мониторы [%s]</string>
+    <string name="live_rec_inactive_group">Не активны / Н/Д</string>
+    <string name="live_rec_all_constant_note"># Все параметры оставались неизменными на протяжении всей записи.</string>
     <string name="live_rec_connect_needed">Сначала подключитесь к авто (или включите Демо) для записи Live-данных</string>
     <string name="live_rec_mark">+ Метка</string>
     <string name="live_rec_mark_fmt">+ Метка (%d)</string>

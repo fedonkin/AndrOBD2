@@ -445,7 +445,13 @@ period of time while the ECU recalibrates itself.
     <string name="live_rec_done_summary_fmt">Duration: %1$s\nSnapshots (1s step): %2$d\nParameters recorded: %3$d\n\n%4$s</string>
     <string name="live_rec_copy_all">Copy entire log</string>
     <string name="live_rec_copied_toast_fmt">Live recording copied to clipboard (%1$d rows, %2$d params)</string>
+    <string name="live_rec_col_time">Time</string>
     <string name="live_rec_col_sec">Sec</string>
+    <string name="live_rec_section_constant_fmt">[Constant parameters — unchanged (%d)]</string>
+    <string name="live_rec_section_dynamic_fmt">[Per-second dynamics — changing parameters (%d)]</string>
+    <string name="live_rec_monitors_prefix_fmt">Monitors [%s]</string>
+    <string name="live_rec_inactive_group">Inactive / N/A</string>
+    <string name="live_rec_all_constant_note"># All parameters remained constant throughout the recording.</string>
     <string name="live_rec_connect_needed">Start Live Data (adapter or Demo) before recording</string>
     <string name="live_rec_mark">+ Mark</string>
     <string name="live_rec_mark_fmt">+ Mark (%d)</string>

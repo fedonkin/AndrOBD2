@@ -37,9 +37,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.fr3ts0n.ecu.BitmapConversion;
+import com.fr3ts0n.ecu.Conversion;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.HashConversion;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
@@ -137,6 +140,7 @@ public class DashBoardActivity extends AppCompatActivity
 				Object item = mAdapter.getItem(position);
 				if (!(item instanceof EcuDataPv)) continue;
 				EcuDataPv currPv = (EcuDataPv) item;
+				if (!isContinuousGaugePv(currPv)) continue;
 
 				int pid = currPv.getAsInt(EcuDataPv.FID_PID);
 				if (pid > 0)
@@ -174,6 +178,26 @@ public class DashBoardActivity extends AppCompatActivity
 		{
 			tvEmpty.setVisibility(count == 0 ? View.VISIBLE : View.GONE);
 		}
+	}
+
+	private static boolean isContinuousGaugePv(EcuDataPv pv)
+	{
+		Object val = pv.get(EcuDataPv.FID_VALUE);
+		if (!(val instanceof Number)) return false;
+		Object cnvObj = pv.get(EcuDataPv.FID_CNVID);
+		if (cnvObj instanceof Conversion[])
+		{
+			Conversion[] cnvs = (Conversion[]) cnvObj;
+			if (EcuDataItem.cnvSystem < cnvs.length && cnvs[EcuDataItem.cnvSystem] != null)
+			{
+				Conversion cnv = cnvs[EcuDataItem.cnvSystem];
+				if (cnv instanceof BitmapConversion || cnv instanceof HashConversion)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	@SuppressLint("WakelockTimeout")
