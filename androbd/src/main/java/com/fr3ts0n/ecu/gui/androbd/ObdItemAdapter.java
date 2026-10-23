@@ -261,6 +261,46 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         };
     }
 
+    private static int getPvInt(EcuDataPv pv, int fieldId)
+    {
+        Object val = pv.get(fieldId);
+        if (val instanceof Number)
+        {
+            return ((Number) val).intValue();
+        }
+        if (val != null)
+        {
+            try
+            {
+                return Integer.parseInt(val.toString());
+            }
+            catch (NumberFormatException ignored)
+            {
+            }
+        }
+        return 0;
+    }
+
+    private static int getPvInt(EcuDataPv pv, Object key)
+    {
+        Object val = pv.get(key);
+        if (val instanceof Number)
+        {
+            return ((Number) val).intValue();
+        }
+        if (val != null)
+        {
+            try
+            {
+                return Integer.parseInt(val.toString());
+            }
+            catch (NumberFormatException ignored)
+            {
+            }
+        }
+        return 0;
+    }
+
     @SuppressWarnings("unchecked")
     private static int comparePidOrder(Object lhs, Object rhs)
     {
@@ -268,11 +308,11 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         {
             EcuDataPv a = (EcuDataPv) lhs;
             EcuDataPv b = (EcuDataPv) rhs;
-            int cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_PID), b.getAsInt(EcuDataPv.FID_PID));
+            int cmp = Integer.compare(getPvInt(a, EcuDataPv.FID_PID), getPvInt(b, EcuDataPv.FID_PID));
             if (cmp != 0) return cmp;
-            cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_OFS), b.getAsInt(EcuDataPv.FID_OFS));
+            cmp = Integer.compare(getPvInt(a, EcuDataPv.FID_OFS), getPvInt(b, EcuDataPv.FID_OFS));
             if (cmp != 0) return cmp;
-            cmp = Integer.compare(a.getAsInt(EcuDataPv.FID_BIT_OFS), b.getAsInt(EcuDataPv.FID_BIT_OFS));
+            cmp = Integer.compare(getPvInt(a, EcuDataPv.FID_BIT_OFS), getPvInt(b, EcuDataPv.FID_BIT_OFS));
             if (cmp != 0) return cmp;
             return String.valueOf(a.get(EcuDataPv.FID_DESCRIPT))
                     .compareTo(String.valueOf(b.get(EcuDataPv.FID_DESCRIPT)));
