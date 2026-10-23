@@ -80,9 +80,9 @@ if errorlevel 1 (
 echo       OK: plugin\build.gradle найден.
 
 rem ----------------------------------------------------------------------------
-rem 2. Поиск или загрузка JDK 17+
+rem 2. Поиск JDK 17 / 21+ (или автозагрузка портативного JDK, если Java нет)
 rem ----------------------------------------------------------------------------
-echo [2/5] Поиск JDK 17+...
+echo [2/5] Поиск установленного JDK ^(поддерживаются JDK 17 и JDK 21^)...
 set "FOUND_JDK="
 set "FOUND_JDK_VER="
 
@@ -94,27 +94,30 @@ if not defined FOUND_JDK (
     )
 )
 
-if not defined FOUND_JDK call :try_jdk "%PROJECT_DIR%.gradle\local-tools\jdk-17"
-if not defined FOUND_JDK call :try_jdk "!ProgramFiles!\Android\Android Studio\jbr"
-if not defined FOUND_JDK call :try_jdk "!ProgramFiles!\Android\Android Studio\jre"
-if not defined FOUND_JDK call :try_jdk "!LOCALAPPDATA!\Programs\Android Studio\jbr"
-
-if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Eclipse Adoptium"
 if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Java"
+if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Eclipse Adoptium"
+if not defined FOUND_JDK call :scan_jdk_dir "!LOCALAPPDATA!\Programs\Eclipse Adoptium"
 if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Microsoft"
+if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\OpenJDK"
 if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\BellSoft"
 if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Zulu"
 if not defined FOUND_JDK call :scan_jdk_dir "!ProgramFiles!\Amazon Corretto"
 if not defined FOUND_JDK call :scan_jdk_dir "!USERPROFILE!\.jdks"
+if not defined FOUND_JDK call :scan_jdk_dir "C:\Java"
+
+if not defined FOUND_JDK call :try_jdk "!ProgramFiles!\Android\Android Studio\jbr"
+if not defined FOUND_JDK call :try_jdk "!ProgramFiles!\Android\Android Studio\jre"
+if not defined FOUND_JDK call :try_jdk "!LOCALAPPDATA!\Programs\Android Studio\jbr"
+if not defined FOUND_JDK call :try_jdk "%PROJECT_DIR%.gradle\local-tools\jdk-17"
 
 if not defined FOUND_JDK (
-    echo       Локальный JDK 17+ не найден. Автоматическая загрузка портативного Temurin JDK 17...
+    echo       Установленный JDK 17/21 не найден. Автоматическая загрузка портативного JDK...
     call :bootstrap_jdk
 )
 
 if not defined FOUND_JDK (
-    echo [ERROR] Не удалось найти или загрузить JDK 17+.
-    echo         Установите JDK 17 ^(https://adoptium.net^) или Android Studio и повторите запуск.
+    echo [ERROR] Не удалось найти или загрузить JDK ^(17 или 21^).
+    echo         Укажите путь к вашему JDK 21 в переменной среды JAVA_HOME и повторите запуск.
     goto :fail
 )
 
@@ -285,10 +288,15 @@ exit /b 1
 set "CAND_JAVA_EXE=%~1"
 if "!CAND_JAVA_EXE!"=="" exit /b 1
 if not exist "!CAND_JAVA_EXE!" exit /b 1
+set "JPROPS_TMP=%TEMP%\androbd_javahome.txt"
+del /q "!JPROPS_TMP!" >nul 2>&1
+"!CAND_JAVA_EXE!" -XshowSettings:properties -version > "!JPROPS_TMP!" 2>&1
+if not exist "!JPROPS_TMP!" exit /b 1
 set "EXTRACTED_HOME="
-for /f "tokens=2 delims==" %%H in ('"!CAND_JAVA_EXE!" -XshowSettings:properties -version 2^>^&1 ^| findstr /c:"java.home ="') do (
+for /f "usebackq tokens=2 delims==" %%H in (`findstr /c:"java.home =" "!JPROPS_TMP!"`) do (
     set "EXTRACTED_HOME=%%H"
 )
+del /q "!JPROPS_TMP!" >nul 2>&1
 if not defined EXTRACTED_HOME exit /b 1
 for /f "tokens=* delims= " %%T in ("!EXTRACTED_HOME!") do set "EXTRACTED_HOME=%%T"
 call :try_jdk "!EXTRACTED_HOME!"
@@ -308,15 +316,21 @@ if defined FOUND_JDK exit /b 0
 set "CAND_JDK=%~1"
 if "!CAND_JDK!"=="" exit /b 1
 if not exist "!CAND_JDK!\bin\java.exe" exit /b 1
+if not exist "!CAND_JDK!\bin\javac.exe" exit /b 1
+set "JVER_TMP=%TEMP%\androbd_javaver.txt"
+del /q "!JVER_TMP!" >nul 2>&1
+"!CAND_JDK!\bin\java.exe" -XshowSettings:properties -version > "!JVER_TMP!" 2>&1
+if not exist "!JVER_TMP!" exit /b 1
 set "J_SPEC="
-for /f "tokens=2 delims==" %%V in ('"!CAND_JDK!\bin\java.exe" -XshowSettings:properties -version 2^>^&1 ^| findstr /c:"java.specification.version"') do (
+for /f "usebackq tokens=2 delims==" %%V in (`findstr /c:"java.specification.version" "!JVER_TMP!"`) do (
     set "J_SPEC=%%V"
 )
+del /q "!JVER_TMP!" >nul 2>&1
 if not defined J_SPEC exit /b 1
 set "J_SPEC=!J_SPEC: =!"
 if "!J_SPEC:~0,2!"=="1." exit /b 1
 set /a J_MAJOR=!J_SPEC! 2>nul
-if !J_MAJOR! GEQ 17 (
+if !J_MAJOR! GEQ 17 if !J_MAJOR! LEQ 24 (
     set "FOUND_JDK=!CAND_JDK!"
     set "FOUND_JDK_VER=!J_MAJOR!"
     exit /b 0
