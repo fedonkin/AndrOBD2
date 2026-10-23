@@ -26,6 +26,7 @@ import android.app.Activity;
 import android.app.SearchManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.DialogInterface;
@@ -99,6 +100,7 @@ import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -195,6 +197,7 @@ public class MainActivity extends PluginManager
     private static final int REQUEST_GRAPH_DISPLAY_DONE = 7;
     private static final int REQUEST_BT_PERMISSIONS = 8;
     private static final int REQUEST_NOTIFICATIONS = 9;
+    private static final int REQUEST_CREATE_CSV_DOCUMENT = 10;
 
     /**
      * Priority PIDs for automatic dashboard / chart quick-launch when no items are checked
@@ -1114,7 +1117,7 @@ public class MainActivity extends PluginManager
         View btnCopyRecordHome = findViewById(R.id.btn_copy_record_home);
         if (btnCopyRecordHome != null)
         {
-            btnCopyRecordHome.setOnClickListener(v -> copyLiveRecordingToClipboard());
+            btnCopyRecordHome.setOnClickListener(v -> showLiveExportDialog(false));
         }
 
         View cardData = findViewById(R.id.card_nav_data);
@@ -1282,7 +1285,7 @@ public class MainActivity extends PluginManager
         View btnCopyLiveRecord = mListView.findViewById(R.id.btn_copy_live_record);
         if (btnCopyLiveRecord != null)
         {
-            btnCopyLiveRecord.setOnClickListener(v -> copyLiveRecordingToClipboard());
+            btnCopyLiveRecord.setOnClickListener(v -> showLiveExportDialog(false));
         }
 
         View chipAll = mListView.findViewById(R.id.chip_preset_all);
@@ -2092,15 +2095,13 @@ public class MainActivity extends PluginManager
             return;
         }
 
-        final String csvText = liveDataRecorder.buildCsvTable(
-                getString(R.string.live_rec_col_time),
-                getString(R.string.live_rec_col_sec),
-                getString(R.string.live_rec_col_mark));
-        saveRecordedCsvInBackground(csvText);
+        final String csvText = buildCurrentCsvText();
+        final String suggestedName = liveDataRecorder.buildSuggestedCsvFileName();
+        saveRecordedCsvInBackground(csvText, suggestedName);
 
         if (showSummaryDialog && !isFinishing())
         {
-            showLiveRecordingFinishedDialog();
+            showLiveExportDialog(true);
         }
     }
 
@@ -2160,14 +2161,25 @@ public class MainActivity extends PluginManager
         }
     }
 
-    private void saveRecordedCsvInBackground(final String exportText)
+    private String buildCurrentCsvText()
+    {
+        return liveDataRecorder.buildCsvTable(
+                getString(R.string.live_rec_col_time),
+                getString(R.string.live_rec_col_sec),
+                getString(R.string.live_rec_col_mark));
+    }
+
+    private void saveRecordedCsvInBackground(final String exportText, final String fileName)
     {
         if (exportText == null || exportText.isEmpty()) return;
         executor.execute(() -> {
             try
             {
                 String dirPath = FileHelper.getPath(MainActivity.this) + File.separator + "csv";
-                File csvFile = new File(dirPath, "live_" + FileHelper.getFileName() + ".csv");
+                String safeName = (fileName != null && !fileName.isEmpty())
+                        ? fileName
+                        : ("live_" + FileHelper.getFileName() + ".csv");
+                File csvFile = new File(dirPath, safeName);
                 LiveDataRecorder.writeUtf8CsvFile(csvFile, exportText);
                 liveDataRecorder.setLastSavedFilePath(csvFile.getAbsolutePath());
             } catch (Exception e)
@@ -2175,6 +2187,116 @@ public class MainActivity extends PluginManager
                 log.log(Level.WARNING, "Failed to save live CSV backup", e);
             }
         });
+    }
+
+    private File ensureCsvBackupSavedSync()
+    {
+        String existingPath = liveDataRecorder.getLastSavedFilePath();
+        if (existingPath != null && !existingPath.isEmpty())
+        {
+            File existing = new File(existingPath);
+            if (existing.exists() && existing.length() > 0L)
+            {
+                return existing;
+            }
+        }
+        String csvText = buildCurrentCsvText();
+        if (csvText.isEmpty()) return null;
+        try
+        {
+            String dirPath = FileHelper.getPath(this) + File.separator + "csv";
+            File csvFile = new File(dirPath, liveDataRecorder.buildSuggestedCsvFileName());
+            LiveDataRecorder.writeUtf8CsvFile(csvFile, csvText);
+            liveDataRecorder.setLastSavedFilePath(csvFile.getAbsolutePath());
+            return csvFile;
+        } catch (Exception e)
+        {
+            log.log(Level.WARNING, "Failed to materialize CSV file", e);
+            return null;
+        }
+    }
+
+    private void promptSaveLiveCsvDocument()
+    {
+        if (!liveDataRecorder.hasSamples()) return;
+        String suggestedName = liveDataRecorder.buildSuggestedCsvFileName();
+        try
+        {
+            Intent createIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            createIntent.addCategory(Intent.CATEGORY_OPENABLE);
+            createIntent.setType("text/csv");
+            createIntent.putExtra(Intent.EXTRA_TITLE, suggestedName);
+            startActivityForResult(createIntent, REQUEST_CREATE_CSV_DOCUMENT);
+        } catch (ActivityNotFoundException ex)
+        {
+            File saved = ensureCsvBackupSavedSync();
+            if (saved != null)
+            {
+                Toast.makeText(this,
+                        getString(R.string.live_rec_csv_saved_toast_fmt, saved.getAbsolutePath()),
+                        Toast.LENGTH_LONG).show();
+            } else
+            {
+                Toast.makeText(this, R.string.live_rec_csv_save_failed_toast, Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void writeLiveCsvToDocumentUri(final Uri targetUri)
+    {
+        if (targetUri == null || !liveDataRecorder.hasSamples()) return;
+        final String csvText = buildCurrentCsvText();
+        if (csvText.isEmpty()) return;
+        final String displayName = liveDataRecorder.buildSuggestedCsvFileName();
+
+        executor.execute(() -> {
+            boolean ok = false;
+            try (OutputStream os = getContentResolver().openOutputStream(targetUri))
+            {
+                if (os != null)
+                {
+                    LiveDataRecorder.writeUtf8CsvStream(os, csvText);
+                    ok = true;
+                }
+            } catch (Exception e)
+            {
+                log.log(Level.WARNING, "Failed to write CSV to document URI", e);
+            }
+
+            final boolean savedOk = ok;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (savedOk)
+                {
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.live_rec_csv_saved_toast_fmt, displayName),
+                            Toast.LENGTH_LONG).show();
+                } else
+                {
+                    Toast.makeText(MainActivity.this,
+                            R.string.live_rec_csv_save_failed_toast,
+                            Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
+    }
+
+    private void copyCompactSummaryToClipboard()
+    {
+        if (!liveDataRecorder.hasSamples()) return;
+
+        String summary = liveDataRecorder.buildCompactSummaryLog(buildRecorderExportLabels());
+        if (summary.isEmpty()) return;
+
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) return;
+
+        clipboard.setPrimaryClip(ClipData.newPlainText("AndrOBD2 Smart Summary", summary));
+        boolean ru = Locale.getDefault().getLanguage().toLowerCase(Locale.US).startsWith("ru");
+        String sizeLabel = LiveDataRecorder.formatApproxByteSize(summary, ru);
+        Toast.makeText(this,
+                getString(R.string.live_rec_summary_copied_toast_fmt, sizeLabel),
+                Toast.LENGTH_LONG).show();
     }
 
     private void copyLiveRecordingToClipboard()
@@ -2234,53 +2356,159 @@ public class MainActivity extends PluginManager
         return sb.toString();
     }
 
-    private void shareLiveRecording()
+    private void shareLiveCsvFile()
     {
         if (!liveDataRecorder.hasSamples()) return;
 
-        String fullLog = liveDataRecorder.buildFormattedLog(buildRecorderExportLabels());
+        String durationStr = LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds());
+        String shortCaption = getString(
+                R.string.live_rec_share_caption_fmt,
+                durationStr,
+                liveDataRecorder.getSampleCount(),
+                liveDataRecorder.getParameterCount());
+
         Intent sendIntent = new Intent(Intent.ACTION_SEND);
-        String savedPath = liveDataRecorder.getLastSavedFilePath();
-        if (savedPath != null && new File(savedPath).exists())
+        File csvFile = ensureCsvBackupSavedSync();
+        if (csvFile != null && csvFile.exists())
         {
             try
             {
                 Uri uri = FileProvider.getUriForFile(
                         this,
                         getPackageName() + ".provider",
-                        new File(savedPath));
+                        csvFile);
                 sendIntent.setType("text/csv");
                 sendIntent.putExtra(Intent.EXTRA_STREAM, uri);
+                sendIntent.putExtra(Intent.EXTRA_TEXT, shortCaption);
+                sendIntent.setClipData(ClipData.newRawUri("AndrOBD2 CSV", uri));
                 sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (Exception ignored)
+                startActivity(Intent.createChooser(sendIntent, getString(R.string.live_rec_opt_share_csv_title)));
+                return;
+            } catch (Exception e)
             {
-                sendIntent.setType("text/plain");
+                log.log(Level.WARNING, "FileProvider CSV share fallback to compact summary", e);
             }
-        } else
-        {
-            sendIntent.setType("text/plain");
         }
-        sendIntent.putExtra(Intent.EXTRA_TEXT, prepareClipboardPayload(fullLog, savedPath));
+
+        // Fallback if FileProvider cannot open stream: share compact summary text
+        String compactText = liveDataRecorder.buildCompactSummaryLog(buildRecorderExportLabels());
+        sendIntent.setType("text/plain");
+        sendIntent.putExtra(Intent.EXTRA_TEXT, compactText);
         startActivity(Intent.createChooser(sendIntent, getString(R.string.share)));
     }
 
-    private void showLiveRecordingFinishedDialog()
+    private void showLiveExportDialog(boolean finishedJustNow)
     {
-        String durationStr = LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds());
-        String summaryMsg = getString(
-                R.string.live_rec_done_summary_fmt,
-                durationStr,
-                liveDataRecorder.getSampleCount(),
-                liveDataRecorder.getParameterCount(),
-                liveDataRecorder.buildShortPreview(6));
+        if (!liveDataRecorder.hasSamples() || isFinishing())
+        {
+            return;
+        }
 
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.live_rec_done_title)
-                .setMessage(summaryMsg)
-                .setPositiveButton(R.string.live_rec_copy_all, (dialog, which) -> copyLiveRecordingToClipboard())
-                .setNeutralButton(R.string.share, (dialog, which) -> shareLiveRecording())
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        boolean ru = Locale.getDefault().getLanguage().toLowerCase(Locale.US).startsWith("ru");
+        LiveDataRecorder.ExportLabels exportLabels = buildRecorderExportLabels();
+        String csvText = buildCurrentCsvText();
+        String summaryText = liveDataRecorder.buildCompactSummaryLog(exportLabels);
+        String fullText = liveDataRecorder.buildFormattedLog(exportLabels);
+
+        String csvSize = LiveDataRecorder.formatApproxByteSize(csvText, ru);
+        String summarySize = LiveDataRecorder.formatApproxByteSize(summaryText, ru);
+        String fullSize = LiveDataRecorder.formatApproxByteSize(fullText, ru);
+
+        String durationStr = LiveDataRecorder.formatDurationMmSs(liveDataRecorder.getDurationSeconds());
+        int sampleCount = liveDataRecorder.getSampleCount();
+        int paramCount = liveDataRecorder.getParameterCount();
+        int dynCount = liveDataRecorder.getDynamicParameterCount();
+        int markCount = liveDataRecorder.getMarkerCount();
+        String marksSuffix = markCount > 0
+                ? getString(R.string.live_rec_export_marks_suffix_fmt, markCount)
+                : "";
+
+        View content = getLayoutInflater().inflate(R.layout.dialog_live_export, null);
+        TextView tvTitle = content.findViewById(R.id.tv_export_dialog_title);
+        TextView tvMeta = content.findViewById(R.id.tv_export_dialog_meta);
+        TextView tvPreview = content.findViewById(R.id.tv_export_dialog_preview);
+        TextView tvSaveSub = content.findViewById(R.id.tv_export_save_csv_sub);
+        TextView tvShareSub = content.findViewById(R.id.tv_export_share_csv_sub);
+        TextView tvSummarySub = content.findViewById(R.id.tv_export_copy_summary_sub);
+        TextView tvFullSub = content.findViewById(R.id.tv_export_copy_full_sub);
+
+        if (tvTitle != null)
+        {
+            tvTitle.setText(finishedJustNow ? R.string.live_rec_done_title : R.string.live_rec_export_title);
+        }
+        if (tvMeta != null)
+        {
+            tvMeta.setText(getString(R.string.live_rec_export_meta_fmt,
+                    durationStr, sampleCount, paramCount, dynCount, marksSuffix));
+        }
+        if (tvPreview != null)
+        {
+            tvPreview.setText(liveDataRecorder.buildShortPreview(6));
+        }
+        if (tvSaveSub != null)
+        {
+            tvSaveSub.setText(getString(R.string.live_rec_opt_save_csv_sub_fmt, csvSize));
+        }
+        if (tvShareSub != null)
+        {
+            tvShareSub.setText(getString(R.string.live_rec_opt_share_csv_sub_fmt, csvSize));
+        }
+        if (tvSummarySub != null)
+        {
+            tvSummarySub.setText(getString(R.string.live_rec_opt_copy_summary_sub_fmt, summarySize));
+        }
+        if (tvFullSub != null)
+        {
+            tvFullSub.setText(getString(R.string.live_rec_opt_copy_full_sub_fmt, sampleCount, fullSize));
+        }
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(content)
+                .create();
+
+        View btnSaveCsv = content.findViewById(R.id.btn_export_save_csv);
+        if (btnSaveCsv != null)
+        {
+            btnSaveCsv.setOnClickListener(v -> {
+                dialog.dismiss();
+                promptSaveLiveCsvDocument();
+            });
+        }
+
+        View btnShareCsv = content.findViewById(R.id.btn_export_share_csv);
+        if (btnShareCsv != null)
+        {
+            btnShareCsv.setOnClickListener(v -> {
+                dialog.dismiss();
+                shareLiveCsvFile();
+            });
+        }
+
+        View btnCopySummary = content.findViewById(R.id.btn_export_copy_summary);
+        if (btnCopySummary != null)
+        {
+            btnCopySummary.setOnClickListener(v -> {
+                dialog.dismiss();
+                copyCompactSummaryToClipboard();
+            });
+        }
+
+        View btnCopyFull = content.findViewById(R.id.btn_export_copy_full);
+        if (btnCopyFull != null)
+        {
+            btnCopyFull.setOnClickListener(v -> {
+                dialog.dismiss();
+                copyLiveRecordingToClipboard();
+            });
+        }
+
+        View btnClose = content.findViewById(R.id.btn_export_close);
+        if (btnClose != null)
+        {
+            btnClose.setOnClickListener(v -> dialog.dismiss());
+        }
+
+        dialog.show();
     }
 
     private void refreshLiveRecorderUi()
@@ -2653,7 +2881,7 @@ public class MainActivity extends PluginManager
 
         if (id == R.id.copy_live_recording)
         {
-            copyLiveRecordingToClipboard();
+            showLiveExportDialog(false);
             return true;
         }
 
@@ -2847,6 +3075,13 @@ public class MainActivity extends PluginManager
             case REQUEST_GRAPH_DISPLAY_DONE:
                 dataViewMode = DATA_VIEW_MODE.LIST;
                 applyActivePresetPolling();
+                break;
+
+            case REQUEST_CREATE_CSV_DOCUMENT:
+                if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null)
+                {
+                    writeLiveCsvToDocumentUri(data.getData());
+                }
                 break;
         }
     }

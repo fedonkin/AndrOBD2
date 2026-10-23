@@ -13,6 +13,7 @@ import com.fr3ts0n.pvs.IndexedProcessVar;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -374,6 +376,48 @@ public class LiveDataRecorder
     public synchronized int getParameterCount()
     {
         return columns.size();
+    }
+
+    public synchronized int getDynamicParameterCount()
+    {
+        if (rows.isEmpty()) return 0;
+        int count = 0;
+        for (ColumnMeta col : columns.values())
+        {
+            if (getConstantValueOrNullLocked(col) == null)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public synchronized String buildSuggestedCsvFileName()
+    {
+        long ts = !rows.isEmpty() ? rows.get(0).wallTimeMs : System.currentTimeMillis();
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US);
+        return "androbd2_live_" + fmt.format(new Date(ts)) + ".csv";
+    }
+
+    public static String formatApproxByteSize(String text, boolean ru)
+    {
+        if (text == null || text.isEmpty())
+        {
+            return ru ? "0 КБ" : "0 KB";
+        }
+        long bytes = text.getBytes(StandardCharsets.UTF_8).length;
+        if (bytes < 1024L)
+        {
+            return bytes + (ru ? " Б" : " B");
+        }
+        double kb = bytes / 1024.0;
+        if (kb < 1024.0)
+        {
+            long roundedKb = Math.max(1L, Math.round(kb));
+            return "~" + roundedKb + (ru ? " КБ" : " KB");
+        }
+        double mb = kb / 1024.0;
+        return String.format(ru ? new Locale("ru") : Locale.US, "~%.1f %s", mb, ru ? "МБ" : "MB");
     }
 
     public synchronized String getLastSavedFilePath()
@@ -840,12 +884,67 @@ public class LiveDataRecorder
                 Conversion cnv = ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem];
                 String fmt = (String) pv.get(EcuDataPv.FID_FORMAT);
                 String formatted = cnv.physToPhysFmtString((Number) colVal, fmt);
-                return sanitizeValue(compactBitfieldValue(formatted));
+                return compactStatusValue(sanitizeValue(compactBitfieldValue(formatted)));
             }
         } catch (Exception ignored)
         {
         }
-        return sanitizeValue(compactBitfieldValue(String.valueOf(colVal)));
+        return compactStatusValue(sanitizeValue(compactBitfieldValue(String.valueOf(colVal))));
+    }
+
+    /**
+     * Compresses standard verbose OBD-II status phrases (which otherwise repeat ~100 characters
+     * on every 1-second row) into crisp, unambiguous diagnostic tokens while leaving numeric
+     * and short string values untouched.
+     */
+    public static String compactStatusValue(String val)
+    {
+        if (val == null || val.length() < 24)
+        {
+            return val != null ? val : "";
+        }
+        String lower = val.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("замкнутый контур") && lower.contains("обратная связь"))
+        {
+            return "CL (по ДК)";
+        }
+        if (lower.startsWith("closed loop") && lower.contains("oxygen sensor feedback"))
+        {
+            return "CL (O2)";
+        }
+        if (lower.startsWith("разомкнутый контур") && lower.contains("температур"))
+        {
+            return "OL (прогрев)";
+        }
+        if (lower.startsWith("open loop") && lower.contains("temperature"))
+        {
+            return "OL (cold)";
+        }
+        if (lower.startsWith("разомкнутый контур") && (lower.contains("нагрузк") || lower.contains("торможен")))
+        {
+            return "OL (нагрузка/ПХХ)";
+        }
+        if (lower.startsWith("open loop") && (lower.contains("load") || lower.contains("deceleration")))
+        {
+            return "OL (load/DFCO)";
+        }
+        if (lower.startsWith("разомкнутый контур") && lower.contains("сбо"))
+        {
+            return "OL (сбой)";
+        }
+        if (lower.startsWith("open loop") && lower.contains("failure"))
+        {
+            return "OL (fault)";
+        }
+        if (lower.startsWith("замкнутый контур") && lower.contains("ошибк"))
+        {
+            return "CL (ошибка ДК)";
+        }
+        if (lower.startsWith("closed loop") && lower.contains("fault"))
+        {
+            return "CL (O2 fault)";
+        }
+        return val;
     }
 
     private static String sanitizeCell(String raw)
@@ -1140,8 +1239,9 @@ public class LiveDataRecorder
     }
 
     /**
-     * Builds a pure rectangular semicolon-delimited CSV table (with compacted bitfields and
-     * deduplicated headers) suitable for spreadsheet software (Excel / LibreOffice).
+     * Builds a pure rectangular semicolon-delimited CSV spreadsheet table (Row 1 = column headers,
+     * changing telemetry columns placed first followed by non-empty constant columns) so Excel,
+     * LibreOffice Calc, and Google Sheets open it cleanly with immediate sorting/charting support.
      */
     public synchronized String buildCsvTable(String timeHeader, String secHeader, String markHeader)
     {
@@ -1154,6 +1254,98 @@ public class LiveDataRecorder
         List<ColumnMeta> sortedCols = getSortedColumnsLocked();
         Map<String, String> uniqueHeaders = buildUniqueTableHeaders(sortedCols);
 
+        List<ColumnMeta> orderedCsvCols = new ArrayList<>(sortedCols.size());
+        List<ColumnMeta> nonEmptyStaticCols = new ArrayList<>();
+        for (ColumnMeta col : sortedCols)
+        {
+            String constVal = getConstantValueOrNullLocked(col);
+            if (constVal == null)
+            {
+                if (!isAllPlaceholderLocked(col))
+                {
+                    orderedCsvCols.add(col);
+                }
+            } else if (!EMPTY_BITFIELD_PLACEHOLDER.equals(constVal))
+            {
+                nonEmptyStaticCols.add(col);
+            }
+        }
+        orderedCsvCols.addAll(nonEmptyStaticCols);
+        if (orderedCsvCols.isEmpty())
+        {
+            orderedCsvCols.addAll(sortedCols);
+        }
+
+        SimpleDateFormat rowTimeFmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
+        boolean includeMarkers = markerCount > 0;
+
+        StringBuilder sb = new StringBuilder(Math.max(512, rows.size() * (orderedCsvCols.size() * 8 + 24)));
+        appendTableSection(sb, orderedCsvCols, uniqueHeaders, labels.timeCol, labels.secCol, labels.markCol,
+                includeMarkers, rowTimeFmt);
+        return sb.toString();
+    }
+
+    private boolean isAllPlaceholderLocked(ColumnMeta col)
+    {
+        boolean sawValue = false;
+        for (SampleRow row : rows)
+        {
+            String v = row.values.get(col.key);
+            if (v != null && !v.isEmpty())
+            {
+                sawValue = true;
+                if (!EMPTY_BITFIELD_PLACEHOLDER.equals(v))
+                {
+                    return false;
+                }
+            }
+        }
+        return sawValue;
+    }
+
+    public synchronized String buildCompactSummaryLog(String timeHeader, String secHeader, String markHeader)
+    {
+        return buildCompactSummaryLog(ExportLabels.defaultsForHeader(timeHeader, secHeader, markHeader));
+    }
+
+    /**
+     * Builds a compact, high-signal diagnostic report (~3–6 KB even on 15–60 min sessions)
+     * designed for instant sharing in chats, forums, or AI analysis:
+     * 1. Session header & constant parameters summary
+     * 2. Per-sensor Start -> End | Min (@s) / Avg / Max (@s) statistics & state transitions
+     * 3. Chronological key timeline snapshots (start, Closed Loop entry, user MARKs, extrema, checkpoints, end)
+     */
+    public synchronized String buildCompactSummaryLog(ExportLabels labels)
+    {
+        if (rows.isEmpty())
+        {
+            return "";
+        }
+
+        boolean ru = hasCyrillic(labels.timeCol)
+                || hasCyrillic(labels.secCol)
+                || hasCyrillic(labels.constantSectionFmt);
+
+        List<ColumnMeta> sortedCols = getSortedColumnsLocked();
+        Map<String, String> uniqueHeaders = buildUniqueTableHeaders(sortedCols);
+
+        List<ColumnMeta> staticCols = new ArrayList<>();
+        Map<String, String> staticValues = new LinkedHashMap<>();
+        List<ColumnMeta> dynamicCols = new ArrayList<>();
+
+        for (ColumnMeta col : sortedCols)
+        {
+            String constVal = getConstantValueOrNullLocked(col);
+            if (constVal != null)
+            {
+                staticCols.add(col);
+                staticValues.put(col.key, constVal);
+            } else
+            {
+                dynamicCols.add(col);
+            }
+        }
+
         SimpleDateFormat fullDateFmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
         SimpleDateFormat rowTimeFmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
 
@@ -1162,22 +1354,325 @@ public class LiveDataRecorder
         long totalSec = rows.get(rows.size() - 1).elapsedSec;
         boolean includeMarkers = markerCount > 0;
 
-        StringBuilder sb = new StringBuilder(Math.max(512, rows.size() * (sortedCols.size() * 8 + 24)));
-        sb.append("# AndrOBD2 Live Log | ")
+        StringBuilder sb = new StringBuilder(4096);
+        sb.append("# AndrOBD2 Smart Summary | ")
                 .append(fullDateFmt.format(new Date(startMs)))
                 .append(" - ")
                 .append(rowTimeFmt.format(new Date(endMs)))
-                .append(String.format(Locale.US, " (%ds, 1s step, %d samples, %d params",
-                        totalSec, rows.size(), sortedCols.size()));
+                .append(String.format(Locale.US, " (%ds, %d samples, %d params: %d changing, %d constant",
+                        totalSec, rows.size(), sortedCols.size(), dynamicCols.size(), staticCols.size()));
         if (includeMarkers)
         {
             sb.append(String.format(Locale.US, ", %d marks", markerCount));
         }
         sb.append(")\n");
 
-        appendTableSection(sb, sortedCols, uniqueHeaders, labels.timeCol, labels.secCol, labels.markCol,
-                includeMarkers, rowTimeFmt);
+        if (!staticCols.isEmpty())
+        {
+            sb.append('\n')
+                    .append(String.format(Locale.US, labels.constantSectionFmt, staticCols.size()))
+                    .append('\n');
+            appendConstantSection(sb, staticCols, staticValues, labels);
+        }
+
+        if (dynamicCols.isEmpty())
+        {
+            sb.append('\n').append(labels.allConstantNote).append('\n');
+            return sb.toString();
+        }
+
+        TreeSet<Integer> priorityRows = new TreeSet<>();
+        priorityRows.add(0);
+        priorityRows.add(rows.size() - 1);
+
+        for (int r = 0; r < rows.size(); r++)
+        {
+            String mk = rows.get(r).marker;
+            if (mk != null && !mk.isEmpty())
+            {
+                priorityRows.add(r);
+            }
+        }
+
+        // Detect engine crank / start transition on RPM (PID 0x0C)
+        for (ColumnMeta col : dynamicCols)
+        {
+            if (col.pid == 0x0C)
+            {
+                double prevRpm = 0.0;
+                for (int r = 0; r < rows.size(); r++)
+                {
+                    double rpmVal = tryParseDouble(rows.get(r).values.get(col.key));
+                    if (!Double.isNaN(rpmVal))
+                    {
+                        if (r > 0 && prevRpm < 250.0 && rpmVal >= 350.0)
+                        {
+                            priorityRows.add(r - 1);
+                            priorityRows.add(r);
+                            break;
+                        }
+                        prevRpm = rpmVal;
+                    }
+                }
+                break;
+            }
+        }
+
+        // Compute per-column statistics and state transitions
+        List<String> numericStatLines = new ArrayList<>();
+        List<String> stateTransitionLines = new ArrayList<>();
+        List<Integer> secondaryExtremaRows = new ArrayList<>();
+
+        for (ColumnMeta col : dynamicCols)
+        {
+            String hdr = uniqueHeaders.get(col.key);
+            if (hdr == null) hdr = col.tableHeader;
+
+            int nonEmptyCount = 0;
+            int numericCount = 0;
+            boolean usesComma = false;
+            String firstStr = "";
+            String lastStr = "";
+            double minVal = Double.POSITIVE_INFINITY;
+            double maxVal = Double.NEGATIVE_INFINITY;
+            String minStr = "";
+            String maxStr = "";
+            int minRow = -1;
+            int maxRow = -1;
+            double sum = 0.0;
+
+            for (int r = 0; r < rows.size(); r++)
+            {
+                String raw = rows.get(r).values.get(col.key);
+                if (raw == null || raw.isEmpty()) continue;
+                nonEmptyCount++;
+                if (firstStr.isEmpty()) firstStr = raw;
+                lastStr = raw;
+                if (raw.indexOf(',') >= 0) usesComma = true;
+
+                double num = tryParseDouble(raw);
+                if (!Double.isNaN(num))
+                {
+                    numericCount++;
+                    sum += num;
+                    if (num < minVal)
+                    {
+                        minVal = num;
+                        minStr = raw;
+                        minRow = r;
+                    }
+                    if (num > maxVal)
+                    {
+                        maxVal = num;
+                        maxStr = raw;
+                        maxRow = r;
+                    }
+                }
+            }
+
+            if (nonEmptyCount == 0) continue;
+
+            if (numericCount > 0 && numericCount * 2 >= nonEmptyCount)
+            {
+                double avg = sum / numericCount;
+                String avgStr = String.format(Locale.US, "%.1f", avg);
+                if (usesComma || ru)
+                {
+                    avgStr = avgStr.replace('.', ',');
+                }
+                long minSec = rows.get(minRow).elapsedSec;
+                long maxSec = rows.get(maxRow).elapsedSec;
+                numericStatLines.add(hdr
+                        + FIELD_SEPARATOR + firstStr
+                        + FIELD_SEPARATOR + lastStr
+                        + FIELD_SEPARATOR + minStr + " (@" + minSec + "s)"
+                        + FIELD_SEPARATOR + avgStr
+                        + FIELD_SEPARATOR + maxStr + " (@" + maxSec + "s)");
+
+                if (isPrimaryExtremaColumn(col))
+                {
+                    if (minRow >= 0) priorityRows.add(minRow);
+                    if (maxRow >= 0) priorityRows.add(maxRow);
+                } else
+                {
+                    if (minRow >= 0) secondaryExtremaRows.add(minRow);
+                    if (maxRow >= 0) secondaryExtremaRows.add(maxRow);
+                }
+            } else
+            {
+                String chain = buildStateTransitionChainLocked(col, priorityRows);
+                if (!chain.isEmpty())
+                {
+                    stateTransitionLines.add("- " + hdr + ": " + chain);
+                }
+            }
+        }
+
+        sb.append('\n')
+                .append(String.format(Locale.US,
+                        ru ? "[Статистика динамики: Старт -> Финиш | Мин / Средн / Макс (%d)]"
+                                : "[Dynamic statistics: Start -> End | Min / Avg / Max (%d)]",
+                        numericStatLines.size() + stateTransitionLines.size()))
+                .append('\n');
+
+        if (!numericStatLines.isEmpty())
+        {
+            sb.append(ru ? "Параметр;Старт;Финиш;Мин;Средн;Макс\n"
+                    : "Parameter;Start;End;Min;Avg;Max\n");
+            for (String line : numericStatLines)
+            {
+                sb.append(line).append('\n');
+            }
+        }
+        for (String stLine : stateTransitionLines)
+        {
+            sb.append(stLine).append('\n');
+        }
+
+        // Select bounded key timeline snapshots
+        List<Integer> selectedRowIndices = selectKeyTimelineRowsLocked(priorityRows, secondaryExtremaRows, 34);
+        sb.append('\n')
+                .append(String.format(Locale.US,
+                        ru ? "[Ключевые кадры и события (%d из %d)]"
+                                : "[Key timeline snapshots (%d of %d)]",
+                        selectedRowIndices.size(), rows.size()))
+                .append('\n');
+
+        appendSelectedRowsTable(sb, dynamicCols, uniqueHeaders, selectedRowIndices,
+                labels.timeCol, labels.secCol, labels.markCol, includeMarkers, rowTimeFmt);
+
         return sb.toString();
+    }
+
+    private static boolean isPrimaryExtremaColumn(ColumnMeta col)
+    {
+        if (col.pid >= 0x100) return true; // Extended Mode 21/22 OEM parameters
+        switch (col.pid)
+        {
+            case 0x04: // Engine load
+            case 0x05: // Coolant temp
+            case 0x06: // STFT B1
+            case 0x07: // LTFT B1
+            case 0x08: // STFT B2
+            case 0x09: // LTFT B2
+            case 0x0A: // Fuel pressure
+            case 0x0B: // MAP
+            case 0x0C: // RPM
+            case 0x0D: // Speed
+            case 0x0E: // Timing advance
+            case 0x10: // MAF
+            case 0x11: // Throttle
+            case 0x22: // Fuel rail pressure (rel)
+            case 0x23: // Fuel rail pressure (direct)
+            case 0x42: // Control module voltage
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private String buildStateTransitionChainLocked(ColumnMeta col, Set<Integer> outTransitionRows)
+    {
+        List<String> steps = new ArrayList<>();
+        String prev = null;
+        int transitions = 0;
+        String lastSeen = "";
+        long lastSec = 0L;
+
+        for (int r = 0; r < rows.size(); r++)
+        {
+            String v = rows.get(r).values.get(col.key);
+            if (v == null || v.isEmpty()) continue;
+            long sec = rows.get(r).elapsedSec;
+            lastSeen = v;
+            lastSec = sec;
+            if (prev == null || !prev.equals(v))
+            {
+                if (prev != null)
+                {
+                    transitions++;
+                    if (transitions <= 4)
+                    {
+                        outTransitionRows.add(r);
+                    }
+                }
+                if (steps.size() < 5)
+                {
+                    steps.add(v + " (@" + sec + "s)");
+                }
+                prev = v;
+            }
+        }
+        if (steps.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < steps.size(); i++)
+        {
+            if (i > 0) sb.append(" -> ");
+            sb.append(steps.get(i));
+        }
+        if (transitions >= 5)
+        {
+            sb.append(" -> ... (").append(transitions).append("x) -> ")
+                    .append(lastSeen).append(" (@").append(lastSec).append("s)");
+        }
+        return sb.toString();
+    }
+
+    private List<Integer> selectKeyTimelineRowsLocked(TreeSet<Integer> priorityRows,
+                                                      List<Integer> secondaryRows,
+                                                      int maxTargetRows)
+    {
+        int total = rows.size();
+        if (total <= maxTargetRows)
+        {
+            List<Integer> all = new ArrayList<>(total);
+            for (int i = 0; i < total; i++) all.add(i);
+            return all;
+        }
+
+        TreeSet<Integer> chosen = new TreeSet<>(priorityRows);
+
+        // Add ~10 evenly spaced warm-up / cruise checkpoints across the session
+        int checkpoints = 10;
+        for (int i = 1; i < checkpoints; i++)
+        {
+            int idx = (int) Math.round((i * (double) (total - 1)) / checkpoints);
+            if (idx > 0 && idx < total - 1)
+            {
+                chosen.add(idx);
+            }
+        }
+
+        for (Integer secIdx : secondaryRows)
+        {
+            if (chosen.size() >= maxTargetRows) break;
+            chosen.add(secIdx);
+        }
+
+        return new ArrayList<>(chosen);
+    }
+
+    private static double tryParseDouble(String raw)
+    {
+        if (raw == null || raw.isEmpty() || EMPTY_BITFIELD_PLACEHOLDER.equals(raw))
+        {
+            return Double.NaN;
+        }
+        String s = raw.trim().replace(',', '.');
+        if (s.isEmpty()) return Double.NaN;
+        char c0 = s.charAt(0);
+        if (!(Character.isDigit(c0) || c0 == '-' || c0 == '+' || c0 == '.'))
+        {
+            return Double.NaN;
+        }
+        try
+        {
+            double d = Double.parseDouble(s);
+            return (Double.isNaN(d) || Double.isInfinite(d)) ? Double.NaN : d;
+        } catch (NumberFormatException e)
+        {
+            return Double.NaN;
+        }
     }
 
     private void appendTableSection(StringBuilder sb,
@@ -1188,6 +1683,25 @@ public class LiveDataRecorder
                                     String markCol,
                                     boolean includeMarkers,
                                     SimpleDateFormat rowTimeFmt)
+    {
+        List<Integer> allIndices = new ArrayList<>(rows.size());
+        for (int i = 0; i < rows.size(); i++)
+        {
+            allIndices.add(i);
+        }
+        appendSelectedRowsTable(sb, cols, uniqueHeaders, allIndices,
+                timeCol, secCol, markCol, includeMarkers, rowTimeFmt);
+    }
+
+    private void appendSelectedRowsTable(StringBuilder sb,
+                                         List<ColumnMeta> cols,
+                                         Map<String, String> uniqueHeaders,
+                                         List<Integer> rowIndices,
+                                         String timeCol,
+                                         String secCol,
+                                         String markCol,
+                                         boolean includeMarkers,
+                                         SimpleDateFormat rowTimeFmt)
     {
         sb.append(sanitizeCell(timeCol))
                 .append(FIELD_SEPARATOR)
@@ -1203,8 +1717,10 @@ public class LiveDataRecorder
         }
         sb.append('\n');
 
-        for (SampleRow row : rows)
+        for (Integer idx : rowIndices)
         {
+            if (idx == null || idx < 0 || idx >= rows.size()) continue;
+            SampleRow row = rows.get(idx);
             sb.append(rowTimeFmt.format(new Date(row.wallTimeMs)))
                     .append(FIELD_SEPARATOR)
                     .append(row.elapsedSec);
@@ -1258,6 +1774,20 @@ public class LiveDataRecorder
     }
 
     /**
+     * Write UTF-8 CSV (with UTF-8 BOM for immediate Excel / LibreOffice Cyrillic compatibility)
+     * to any output stream (file or Android SAF document URI).
+     */
+    public static void writeUtf8CsvStream(OutputStream os, String textContent) throws IOException
+    {
+        os.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+        if (textContent != null && !textContent.isEmpty())
+        {
+            os.write(textContent.getBytes(StandardCharsets.UTF_8));
+        }
+        os.flush();
+    }
+
+    /**
      * Save UTF-8 CSV (with UTF-8 BOM for spreadsheet compatibility) to disk.
      */
     public static void writeUtf8CsvFile(File targetFile, String textContent) throws IOException
@@ -1270,9 +1800,7 @@ public class LiveDataRecorder
         }
         try (FileOutputStream fos = new FileOutputStream(targetFile))
         {
-            fos.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
-            fos.write(textContent.getBytes(StandardCharsets.UTF_8));
-            fos.flush();
+            writeUtf8CsvStream(fos, textContent);
         }
     }
 }

@@ -4,6 +4,9 @@ import com.fr3ts0n.ecu.EcuDataPv;
 
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -215,7 +218,106 @@ public class LiveDataRecorderTest
         assertFalse(formatted.contains("(  )"));
 
         String csv = recorder.buildCsvTable("Время [s]", "Сек", "Метка");
-        assertTrue(csv.contains("Время;Сек;"));
+        assertTrue(csv.startsWith("Время;Сек;Дроссель [%]"));
         assertFalse(csv.contains("(  )"));
+        assertFalse(csv.contains("Рециркуляции выхлопных газов"));
+    }
+
+    @Test
+    public void compactsVerboseStatusStringsAndBuildsPureBomCsvAndSmartSummary() throws IOException
+    {
+        assertEquals("CL (по ДК)", LiveDataRecorder.compactStatusValue(
+                "Замкнутый контур, используется обратная связь по кислородному датчику для определения состава смеси"));
+        assertEquals("OL (прогрев)", LiveDataRecorder.compactStatusValue(
+                "Разомкнутый контур из-за недостаточной температуры двигателя"));
+        assertEquals("CL (O2)", LiveDataRecorder.compactStatusValue(
+                "Closed loop, using oxygen sensor feedback to determine fuel mix"));
+
+        final List<EcuDataPv> liveItems = new ArrayList<>();
+        EcuDataPv fuelSys = makePv(0x03, "FSYS1", "Состояние топливной системы 1",
+                "Разомкнутый контур из-за недостаточной температуры двигателя", "");
+        EcuDataPv ect = makePv(0x05, "ECT", "Температура охлаждающей жидкости", "19", "°C");
+        EcuDataPv ltft1 = makePv(0x07, "LTFT1", "Долговременная топливная корректировка (Банк 1)", "0,0", "%");
+        EcuDataPv rpm = makePv(0x0C, "RPM", "Обороты двигателя", 0, "rpm");
+        EcuDataPv mil = makePv(0x01, "MIL", "Состояние индикатора неисправности", "Выкл", "");
+
+        liveItems.add(fuelSys);
+        liveItems.add(ect);
+        liveItems.add(ltft1);
+        liveItems.add(rpm);
+        liveItems.add(mil);
+
+        LiveDataRecorder recorder = new LiveDataRecorder(new LiveDataRecorder.DataSource()
+        {
+            @Override
+            public Collection<?> getPidItems() { return liveItems; }
+            @Override
+            public Collection<?> getPluginItems() { return Collections.emptyList(); }
+        });
+
+        long t0 = 1_761_225_690_000L;
+        recorder.startForTest(t0);
+
+        for (int s = 0; s < 120; s++)
+        {
+            if (s == 3)
+            {
+                rpm.put(EcuDataPv.FID_VALUE, 1520);
+            } else if (s >= 15 && s < 80)
+            {
+                rpm.put(EcuDataPv.FID_VALUE, 750);
+                fuelSys.put(EcuDataPv.FID_VALUE,
+                        "Замкнутый контур, используется обратная связь по кислородному датчику для определения состава смеси");
+                ltft1.put(EcuDataPv.FID_VALUE, "-14,8");
+            } else if (s == 90)
+            {
+                rpm.put(EcuDataPv.FID_VALUE, 2828);
+                ltft1.put(EcuDataPv.FID_VALUE, "-2,3");
+            } else if (s > 90)
+            {
+                rpm.put(EcuDataPv.FID_VALUE, 790);
+                ltft1.put(EcuDataPv.FID_VALUE, "-16,4");
+            }
+            ect.put(EcuDataPv.FID_VALUE, String.valueOf(19 + (s * 70) / 119));
+
+            long ts = t0 + s * 1000L;
+            assertTrue(recorder.captureSnapshotAt(ts));
+            if (s == 75)
+            {
+                assertEquals("MARK_1", recorder.addMarkerAt(ts));
+            }
+        }
+        recorder.stopForTest(t0 + 119_000L);
+
+        assertEquals(4, recorder.getDynamicParameterCount());
+        assertTrue(recorder.buildSuggestedCsvFileName().endsWith(".csv"));
+
+        // 1. Pure rectangular CSV with UTF-8 BOM
+        String csv = recorder.buildCsvTable("Время", "Сек", "Метка");
+        String[] csvLines = csv.split("\n");
+        assertEquals(121, csvLines.length); // 1 header + 120 data rows
+        assertTrue(csvLines[0].startsWith("Время;Сек;Метка;Топл. система 1;Темп. ОЖ [°C];"));
+        assertTrue(csv.contains(";CL (по ДК);"));
+        assertFalse(csv.contains("используется обратная связь"));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        LiveDataRecorder.writeUtf8CsvStream(baos, csv);
+        byte[] rawBytes = baos.toByteArray();
+        assertEquals((byte) 0xEF, rawBytes[0]);
+        assertEquals((byte) 0xBB, rawBytes[1]);
+        assertEquals((byte) 0xBF, rawBytes[2]);
+        assertEquals(csv, new String(rawBytes, 3, rawBytes.length - 3, StandardCharsets.UTF_8));
+
+        // 2. Smart compact summary is dramatically shorter while retaining stats, transitions & MARK_1
+        String fullLog = recorder.buildFormattedLog("Время", "Сек", "Метка");
+        String summary = recorder.buildCompactSummaryLog("Время", "Сек", "Метка");
+        assertTrue(summary.length() < fullLog.length() / 2);
+        assertTrue(summary.startsWith("# AndrOBD2 Smart Summary |"));
+        assertTrue(summary.contains("[Статистика динамики: Старт -> Финиш | Мин / Средн / Макс (4)]"));
+        assertTrue(summary.contains("Обороты двигателя [rpm];0;790;0 (@0s);"));
+        assertTrue(summary.contains("2828 (@90s)"));
+        assertTrue(summary.contains("-16,4 (@91s)"));
+        assertTrue(summary.contains("- Топл. система 1: OL (прогрев) (@0s) -> CL (по ДК) (@15s)"));
+        assertTrue(summary.contains(";75;MARK_1;"));
     }
 }

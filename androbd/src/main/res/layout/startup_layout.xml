@@ -379,8 +379,8 @@
                     <ImageView
                         android:layout_width="16dp"
                         android:layout_height="16dp"
-                        android:contentDescription="@string/live_rec_copy_all"
-                        android:src="@drawable/ic_copy"
+                        android:contentDescription="@string/live_rec_export_title"
+                        android:src="@drawable/ic_save"
                         app:tint="@color/accent_primary" />
 
                     <TextView
@@ -390,7 +390,7 @@
                         android:layout_marginStart="8dp"
                         android:ellipsize="end"
                         android:maxLines="1"
-                        android:text="@string/live_rec_copy_all"
+                        android:text="@string/live_rec_export_title"
                         android:textColor="@color/accent_primary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
