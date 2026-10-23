@@ -330,6 +330,57 @@
                             android:textStyle="bold" />
 
                         <TextView
+                            android:id="@+id/chip_preset_kia_engine"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_kia_engine"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/chip_preset_kia_chassis"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_kia_chassis"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/chip_preset_kia_all"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_chip_selector"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/preset_kia_all"
+                            android:textColor="@color/chip_text_color"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <TextView
                             android:id="@+id/chip_preset_jaguar_trans"
                             android:layout_width="wrap_content"
                             android:layout_height="28dp"

@@ -30,6 +30,7 @@ import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
+import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
@@ -128,7 +129,7 @@ public class DfcItemAdapter extends ObdItemAdapter
 		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
 		if (tvSublabel != null)
 		{
-			Object modObj = JaguarStypeSupport.isEnabled()
+			Object modObj = (JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled())
 					? currPv.get(JaguarStypeSupport.CODE_FIELD_MODULE)
 					: null;
 			String hint = getContext().getString(R.string.long_press_dfc_hint);

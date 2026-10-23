@@ -3,6 +3,7 @@ package com.fr3ts0n.ecu.gui.androbd;
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
+import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
@@ -162,7 +163,7 @@ public class DiagnosticReportBuilder
                 String code = codeObj != null ? String.valueOf(codeObj).trim() : "---";
                 String desc = descObj != null ? String.valueOf(descObj).trim() : "";
                 String status = resolveStatusText(code, item.get(EcuCodeItem.FID_STATUS), labels);
-                Object modObj = JaguarStypeSupport.isEnabled()
+                Object modObj = (JaguarStypeSupport.isEnabled() || KiaVengaSupport.isEnabled())
                         ? item.get(JaguarStypeSupport.CODE_FIELD_MODULE)
                         : null;
                 String modPrefix = (modObj != null && !String.valueOf(modObj).trim().isEmpty())
@@ -269,7 +270,8 @@ public class DiagnosticReportBuilder
             EcuDataPv pv = (EcuDataPv) obj;
             int pid = pv.getAsInt(EcuDataPv.FID_PID);
             boolean includePid = SNAPSHOT_CONTEXT_PIDS.contains(pid)
-                    || (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pid));
+                    || (JaguarStypeSupport.isEnabled() && JaguarStypeSupport.isMode22Pid(pid))
+                    || (KiaVengaSupport.isEnabled() && KiaVengaSupport.isKiaExtendedPid(pid));
             if (includePid && pv.get(EcuDataPv.FID_VALUE) != null)
             {
                 matching.add(pv);

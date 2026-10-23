@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
+import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 
 import java.util.Arrays;
@@ -32,11 +33,19 @@ public class PidPresetManager
         DRIVING,
         JAGUAR_TRANS,
         JAGUAR_VVT,
-        JAGUAR_ALL;
+        JAGUAR_ALL,
+        KIA_ENGINE,
+        KIA_CHASSIS,
+        KIA_ALL;
 
         public boolean isJaguarPreset()
         {
             return this == JAGUAR_TRANS || this == JAGUAR_VVT || this == JAGUAR_ALL;
+        }
+
+        public boolean isKiaPreset()
+        {
+            return this == KIA_ENGINE || this == KIA_CHASSIS || this == KIA_ALL;
         }
     }
 
@@ -50,6 +59,31 @@ public class PidPresetManager
     private static final Set<Integer> JAGUAR_VVT_PIDS = unmodifiablePidSet(
             0x0C, 0x06, 0x07, 0x08, 0x09, 0x10, 0x0B, 0x0E,
             0x16CF, 0x091E, 0x16CD, 0x16CE, 0x1103, 0x123B
+    );
+
+    /** KIA Venga Engine / CVVT / Knock / Misfire / CRDi DPF / IBS Mode 01 + Mode 21/22 PIDs */
+    private static final Set<Integer> KIA_ENGINE_PIDS = unmodifiablePidSet(
+            0x0C, 0x05, 0x06, 0x07, 0x0B, 0x0E, 0x42,
+            KiaVengaSupport.PID_BLK_ECM_2101,
+            KiaVengaSupport.PID_BLK_ECM_2117,
+            KiaVengaSupport.PID_BLK_ECM_CVVT20,
+            KiaVengaSupport.PID_BLK_ECM_2116,
+            KiaVengaSupport.PID_BLK_ECM_2108,
+            KiaVengaSupport.PID_BLK_CRDI_2103,
+            KiaVengaSupport.PID_BLK_CRDI_2106,
+            KiaVengaSupport.PID_BLK_CRDI_DPF22,
+            KiaVengaSupport.PID_BLK_IBS_2127
+    );
+
+    /** KIA Venga Gearbox (4AT/6AT), ABS/ESC Wheel Speeds, MDPS Steering, Cluster & TPMS PIDs */
+    private static final Set<Integer> KIA_CHASSIS_PIDS = unmodifiablePidSet(
+            0x0C, 0x0D, 0x05,
+            KiaVengaSupport.PID_BLK_TCM_21A0,
+            KiaVengaSupport.PID_BLK_ABS_2101,
+            KiaVengaSupport.PID_BLK_MDPS_2101,
+            KiaVengaSupport.PID_BLK_MDPS_2201,
+            KiaVengaSupport.PID_BLK_CLU_B002,
+            KiaVengaSupport.PID_BLK_TPMS_2106
     );
 
     /** Startup, idle & warm-up diagnostics PIDs */
@@ -219,15 +253,28 @@ public class PidPresetManager
             case STARTUP:
                 return STARTUP_PIDS.contains(pid)
                         || (JaguarStypeSupport.isEnabled()
-                            && (pid == 0x1310 || pid == 0x162B || pid == 0x1155));
+                            && (pid == 0x1310 || pid == 0x162B || pid == 0x1155))
+                        || (KiaVengaSupport.isEnabled()
+                            && (pid == KiaVengaSupport.PID_BLK_ECM_2101
+                                || pid == KiaVengaSupport.PID_BLK_IBS_2127));
             case FUEL:
                 return FUEL_PIDS.contains(pid)
-                        || (JaguarStypeSupport.isEnabled() && (pid == 0x1103 || pid == 0x123B));
+                        || (JaguarStypeSupport.isEnabled() && (pid == 0x1103 || pid == 0x123B))
+                        || (KiaVengaSupport.isEnabled()
+                            && (pid == KiaVengaSupport.PID_BLK_CRDI_2103
+                                || pid == KiaVengaSupport.PID_BLK_CRDI_2106
+                                || pid == KiaVengaSupport.PID_BLK_CRDI_DPF22
+                                || pid == KiaVengaSupport.PID_BLK_CLU_B002));
             case DRIVING:
                 return DRIVING_PIDS.contains(pid)
                         || (JaguarStypeSupport.isEnabled()
                             && (pid == 0x1674 || pid == 0x11BD || pid == 0x11B8
-                                || pid == 0x11B3 || pid == 0x1310));
+                                || pid == 0x11B3 || pid == 0x1310))
+                        || (KiaVengaSupport.isEnabled()
+                            && (pid == KiaVengaSupport.PID_BLK_TCM_21A0
+                                || pid == KiaVengaSupport.PID_BLK_ABS_2101
+                                || pid == KiaVengaSupport.PID_BLK_MDPS_2101
+                                || pid == KiaVengaSupport.PID_BLK_TPMS_2106));
             case JAGUAR_TRANS:
                 return JaguarStypeSupport.isEnabled() && JAGUAR_TRANS_PIDS.contains(pid);
             case JAGUAR_VVT:
@@ -235,6 +282,14 @@ public class PidPresetManager
             case JAGUAR_ALL:
                 return JaguarStypeSupport.isEnabled()
                         && (JaguarStypeSupport.isMode22Pid(pid)
+                            || pid == 0x0C || pid == 0x05 || pid == 0x42);
+            case KIA_ENGINE:
+                return KiaVengaSupport.isEnabled() && KIA_ENGINE_PIDS.contains(pid);
+            case KIA_CHASSIS:
+                return KiaVengaSupport.isEnabled() && KIA_CHASSIS_PIDS.contains(pid);
+            case KIA_ALL:
+                return KiaVengaSupport.isEnabled()
+                        && (KiaVengaSupport.isKiaExtendedPid(pid)
                             || pid == 0x0C || pid == 0x05 || pid == 0x42);
             default:
                 return true;
@@ -257,32 +312,64 @@ public class PidPresetManager
         if (preset == Preset.STARTUP)
         {
             result.addAll(STARTUP_PIDS);
+            if (JaguarStypeSupport.isEnabled())
+            {
+                result.add(0x1310);
+                result.add(0x162B);
+                result.add(0x1155);
+            }
+            if (KiaVengaSupport.isEnabled())
+            {
+                result.add(KiaVengaSupport.PID_BLK_ECM_2101);
+                result.add(KiaVengaSupport.PID_BLK_IBS_2127);
+            }
             return result;
         }
         if (preset == Preset.FUEL)
         {
             result.addAll(FUEL_PIDS);
+            if (JaguarStypeSupport.isEnabled())
+            {
+                result.add(0x1103);
+                result.add(0x123B);
+            }
+            if (KiaVengaSupport.isEnabled())
+            {
+                result.add(KiaVengaSupport.PID_BLK_CRDI_2103);
+                result.add(KiaVengaSupport.PID_BLK_CRDI_2106);
+                result.add(KiaVengaSupport.PID_BLK_CRDI_DPF22);
+                result.add(KiaVengaSupport.PID_BLK_CLU_B002);
+            }
             return result;
         }
         if (preset == Preset.DRIVING)
         {
             result.addAll(DRIVING_PIDS);
+            if (JaguarStypeSupport.isEnabled())
+            {
+                result.add(0x1674);
+                result.add(0x11BD);
+                result.add(0x11B8);
+                result.add(0x11B3);
+                result.add(0x1310);
+            }
+            if (KiaVengaSupport.isEnabled())
+            {
+                result.add(KiaVengaSupport.PID_BLK_TCM_21A0);
+                result.add(KiaVengaSupport.PID_BLK_ABS_2101);
+                result.add(KiaVengaSupport.PID_BLK_MDPS_2101);
+                result.add(KiaVengaSupport.PID_BLK_TPMS_2106);
+            }
             return result;
         }
         if (preset == Preset.JAGUAR_TRANS)
         {
-            for (Integer p : JAGUAR_TRANS_PIDS)
-            {
-                if (p < 0x0100) result.add(p);
-            }
+            result.addAll(JAGUAR_TRANS_PIDS);
             return result;
         }
         if (preset == Preset.JAGUAR_VVT)
         {
-            for (Integer p : JAGUAR_VVT_PIDS)
-            {
-                if (p < 0x0100) result.add(p);
-            }
+            result.addAll(JAGUAR_VVT_PIDS);
             return result;
         }
         if (preset == Preset.JAGUAR_ALL)
@@ -290,6 +377,29 @@ public class PidPresetManager
             result.add(0x0C);
             result.add(0x05);
             result.add(0x42);
+            result.addAll(JAGUAR_TRANS_PIDS);
+            result.addAll(JAGUAR_VVT_PIDS);
+            result.add(JaguarStypeSupport.PID_SENSOR_VREF);
+            result.add(JaguarStypeSupport.PID_MODULE_DTC_COUNT);
+            return result;
+        }
+        if (preset == Preset.KIA_ENGINE)
+        {
+            result.addAll(KIA_ENGINE_PIDS);
+            return result;
+        }
+        if (preset == Preset.KIA_CHASSIS)
+        {
+            result.addAll(KIA_CHASSIS_PIDS);
+            return result;
+        }
+        if (preset == Preset.KIA_ALL)
+        {
+            result.add(0x0C);
+            result.add(0x05);
+            result.add(0x42);
+            result.addAll(KIA_ENGINE_PIDS);
+            result.addAll(KIA_CHASSIS_PIDS);
             return result;
         }
         if (preset == Preset.FAVORITES && availablePidItems != null && favorites != null)
@@ -300,7 +410,7 @@ public class PidPresetManager
                 if (item instanceof EcuDataPv && isFavorite(favorites, item))
                 {
                     int pid = safeInt(((EcuDataPv) item).get(EcuDataPv.FID_PID));
-                    if (pid > 0 && pid < 0x0100)
+                    if (pid > 0)
                     {
                         result.add(pid);
                     }
@@ -338,7 +448,9 @@ public class PidPresetManager
             if (pid == 0x42
                     || "ecu_voltage".equals(mnem)
                     || "battery_voltage".equals(mnem)
-                    || "control_module_voltage".equals(mnem))
+                    || "control_module_voltage".equals(mnem)
+                    || "kia_ecu_voltage".equals(mnem)
+                    || "kia_clu_voltage".equals(mnem))
             {
                 double volts = ((Number) valObj).doubleValue();
                 if (volts > 1.0 && volts < 36.0)

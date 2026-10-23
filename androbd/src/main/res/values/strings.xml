@@ -488,10 +488,16 @@ period of time while the ECU recalibrates itself.
     <string name="range_max_label">Max</string>
     <string name="session_status_label">CONNECTION</string>
 
-    <!-- Jaguar S-Type vehicle profile & diagnostics -->
+    <!-- Vehicle profiles (Standard OBD-II, KIA Venga, Jaguar S-Type) -->
     <string name="vehicle_profile_title">Vehicle profile</string>
-    <string name="vehicle_profile_summary">Manufacturer fault codes, Mode 22 PIDs &amp; module commands</string>
+    <string name="vehicle_profile_summary">Manufacturer fault codes, extended PIDs &amp; ECU module scan</string>
     <string name="vehicle_profile_standard">Standard OBD-II (any car)</string>
+    <string name="vehicle_profile_kia_auto">KIA Venga (2009–2019, Auto)</string>
+    <string name="vehicle_profile_kia_petrol">KIA Venga 1.4 / 1.6 CVVT Petrol (G4FA / G4FC)</string>
+    <string name="vehicle_profile_kia_diesel">KIA Venga 1.4 / 1.6 CRDi Diesel (D4FC / D4FB)</string>
+    <string name="vehicle_profile_short_kia">KIA Venga</string>
+    <string name="vehicle_profile_short_kia_petrol">KIA Venga CVVT</string>
+    <string name="vehicle_profile_short_kia_diesel">KIA Venga CRDi</string>
     <string name="vehicle_profile_jaguar_auto">Jaguar S-Type (1999–2007, Auto)</string>
     <string name="vehicle_profile_jaguar_x200">Jaguar S-Type 1999–2002.0 (X200 SCP / 5R55N)</string>
     <string name="vehicle_profile_jaguar_x202">Jaguar S-Type 2002.5+ (X202 CAN+SCP / ZF 6HP26)</string>
@@ -500,16 +506,35 @@ period of time while the ECU recalibrates itself.
     <string name="vehicle_profile_short_jaguar_x202">Jaguar S-Type X202</string>
     <string-array name="vehicle_profile_options" translatable="false">
         <item>@string/vehicle_profile_standard</item>
+        <item>@string/vehicle_profile_kia_auto</item>
+        <item>@string/vehicle_profile_kia_petrol</item>
+        <item>@string/vehicle_profile_kia_diesel</item>
         <item>@string/vehicle_profile_jaguar_auto</item>
         <item>@string/vehicle_profile_jaguar_x200</item>
         <item>@string/vehicle_profile_jaguar_x202</item>
     </string-array>
     <string-array name="vehicle_profile_values" translatable="false">
         <item>standard</item>
+        <item>kia_venga_auto</item>
+        <item>kia_venga_petrol</item>
+        <item>kia_venga_diesel</item>
         <item>jaguar_stype_auto</item>
         <item>jaguar_stype_x200</item>
         <item>jaguar_stype_x202</item>
     </string-array>
+    <string name="preset_kia_engine">Engine / CVVT / DPF</string>
+    <string name="preset_kia_chassis">Gearbox / Chassis</string>
+    <string name="preset_kia_all">KIA 21h/22h</string>
+    <string name="kia_mod_engine_obd">Engine (OBD)</string>
+    <string name="kia_mod_ecm">Engine (ECM)</string>
+    <string name="kia_mod_tcm">Gearbox (TCM)</string>
+    <string name="kia_mod_abs">ABS / ESC</string>
+    <string name="kia_mod_mdps">Steering (MDPS)</string>
+    <string name="kia_mod_srs">Airbag (SRS)</string>
+    <string name="kia_mod_bcm">Body / SMK</string>
+    <string name="kia_mod_clu">Cluster (CLU)</string>
+    <string name="kia_mod_fatc">Climate (FATC)</string>
+    <string name="kia_mod_tpms">Tires (TPMS)</string>
     <string name="preset_jaguar_trans">Gearbox / ATF</string>
     <string name="preset_jaguar_vvt">VVT &amp; IMT</string>
     <string name="preset_jaguar_all">Jaguar 22h</string>

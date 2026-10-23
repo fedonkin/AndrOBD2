@@ -51,6 +51,7 @@ import java.util.Locale;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
 import com.fr3ts0n.ecu.prot.obd.JaguarStypeSupport;
+import com.fr3ts0n.ecu.prot.obd.KiaVengaSupport;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 
 import java.util.HashSet;
@@ -71,6 +72,7 @@ public class SettingsActivity extends AppCompatActivity
 	};
 	static final String KEY_DATA_ITEMS = "data_items";
 	static final String KEY_JAGUAR_ITEMS_SEEDED = "jaguar_mode22_items_seeded";
+	static final String KEY_KIA_ITEMS_SEEDED = "kia_venga_items_seeded";
 	static final String KEY_PROT_SELECT = "protocol";
 	static final String KEY_COMM_MEDIUM = "comm_medium";
 	static final String KEY_VEHICLE_PROFILE = JaguarStypeSupport.PREF_KEY_VEHICLE_PROFILE;
@@ -104,6 +106,7 @@ public class SettingsActivity extends AppCompatActivity
 		}
 		resources.updateConfiguration(config, resources.getDisplayMetrics());
 		JaguarStypeSupport.refreshLabels();
+		KiaVengaSupport.refreshLabels();
 	}
 
 	@Override
@@ -457,6 +460,10 @@ public class SettingsActivity extends AppCompatActivity
 			{
 				items.addAll(JaguarStypeSupport.getAllMode22DataItems());
 			}
+			else if (KiaVengaSupport.isEnabled())
+			{
+				items.addAll(KiaVengaSupport.getAllExtendedDataItems());
+			}
 			HashSet<String> selections = new HashSet<>();
 			CharSequence[] titles = new CharSequence[items.size()];
 			CharSequence[] keys = new CharSequence[items.size()];
@@ -481,6 +488,10 @@ public class SettingsActivity extends AppCompatActivity
 				{
 					prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
 				}
+				if (KiaVengaSupport.isEnabled())
+				{
+					prefs.edit().putBoolean(KEY_KIA_ITEMS_SEEDED, true).apply();
+				}
 			}
 			else if (JaguarStypeSupport.isEnabled()
 					&& !prefs.getBoolean(KEY_JAGUAR_ITEMS_SEEDED, false))
@@ -494,6 +505,17 @@ public class SettingsActivity extends AppCompatActivity
 				}
 				itemList.setValues(merged);
 				prefs.edit().putBoolean(KEY_JAGUAR_ITEMS_SEEDED, true).apply();
+			}
+			else if (KiaVengaSupport.isEnabled()
+					&& !prefs.getBoolean(KEY_KIA_ITEMS_SEEDED, false))
+			{
+				HashSet<String> merged = new HashSet<String>(itemList.getValues());
+				for (EcuDataItem kiaItem : KiaVengaSupport.getAllExtendedDataItems())
+				{
+					merged.add(kiaItem.toString());
+				}
+				itemList.setValues(merged);
+				prefs.edit().putBoolean(KEY_KIA_ITEMS_SEEDED, true).apply();
 			}
 		}
 
@@ -679,9 +701,9 @@ public class SettingsActivity extends AppCompatActivity
 
 			if(KEY_VEHICLE_PROFILE.equals(key))
 			{
-				JaguarStypeSupport.setProfileByKey(
-					sharedPreferences.getString(KEY_VEHICLE_PROFILE, "standard"),
-					ObdProt.PidPvs);
+				String profVal = sharedPreferences.getString(KEY_VEHICLE_PROFILE, "standard");
+				JaguarStypeSupport.setProfileByKey(profVal, ObdProt.PidPvs);
+				KiaVengaSupport.setProfileByKey(profVal, ObdProt.PidPvs);
 				setupPidSelection();
 			}
 

@@ -378,7 +378,10 @@ public final class JaguarStypeSupport
             }
         } else
         {
-            EcuCodeList.setOverlayBundleName(null);
+            if (JAGUAR_CODES_BUNDLE.equals(EcuCodeList.getOverlayBundleName()))
+            {
+                EcuCodeList.setOverlayBundleName(null);
+            }
             activeModule = DiagModule.ENGINE_OBD;
             jaguarPresetFocused = false;
             resetSessionState();
