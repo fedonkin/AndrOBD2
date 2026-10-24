@@ -6,6 +6,7 @@ import com.fr3ts0n.ecu.prot.obd.Messages;
 import com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarStypeProfile;
 import com.fr3ts0n.ecu.prot.obd.vehicles.kia.KiaVengaProfile;
 import com.fr3ts0n.pvs.PvList;
+import com.fr3ts0n.ecu.prot.obd.vehicles.volvo.VolvoXc90Profile;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -28,7 +29,8 @@ public final class VehicleProfileManager
     private static final List<VehicleProfileHandler> HANDLERS = Collections.unmodifiableList(
             Arrays.<VehicleProfileHandler>asList(
                     KiaVengaProfile.INSTANCE,
-                    JaguarStypeProfile.INSTANCE
+                    JaguarStypeProfile.INSTANCE,
+                    VolvoXc90Profile.INSTANCE
             ));
 
     private static volatile VehicleProfileHandler activeHandler = null;

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vehicle_profile_volvo_p2">Volvo XC90 I (P2) — экспериментальные CAN PID</string>
+    <string name="vehicle_profile_volvo_spa">Volvo XC90 II (SPA, 2016–2021) — экспериментальные CAN PID</string>
+    <string name="vehicle_profile_short_volvo_p2">XC90 I · P2 · ЭКСП</string>
+    <string name="vehicle_profile_short_volvo_spa">XC90 II · SPA · ЭКСП</string>
+    <string name="volvo_mod_engine_obd">Двигатель OBD-II (не полный опрос VIDA)</string>
+</resources>

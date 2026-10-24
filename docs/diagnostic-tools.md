@@ -38,3 +38,10 @@
 5. Record, stop and export; verify the observations are labeled preliminary and that markers remain in CSV and smart summary.
 6. Open CSV through the system picker; choose four channels, scrub, jump to MARK, rotate device, reopen from recent files and revoke file access. Check 320dp portrait, landscape, day/night, and enlarged font.
 7. Compare estimated fuel rate with a validated reference before relying on it for trip costs.
+
+## Volvo XC90 I / II (experimental)
+
+Two generation-specific profiles, a small EN/RU Volvo P-code reference, and
+read-only experimental CAN Mode 22 candidates are documented in
+[volvo-xc90.md](volvo-xc90.md). This is not full VIDA/D2/DoIP coverage;
+read the generation, transport and source-validation limits before use.

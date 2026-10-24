@@ -1,6 +1,7 @@
 package com.fr3ts0n.ecu.gui.androbd.vehicles;
 
 import android.content.Context;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.volvo.VolvoXc90UiProfile;
 
 import com.fr3ts0n.ecu.gui.androbd.PidPresetManager;
 import com.fr3ts0n.ecu.gui.androbd.R;
@@ -22,7 +23,8 @@ public final class VehicleUiRegistry
     private static final List<VehicleUiProfile> UI_PROFILES = Collections.unmodifiableList(
             Arrays.<VehicleUiProfile>asList(
                     KiaVengaUiProfile.INSTANCE,
-                    JaguarStypeUiProfile.INSTANCE
+                    JaguarStypeUiProfile.INSTANCE,
+                    VolvoXc90UiProfile.INSTANCE
             ));
 
     private VehicleUiRegistry()

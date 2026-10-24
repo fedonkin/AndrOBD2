@@ -516,6 +516,8 @@ period of time while the ECU recalibrates itself.
         <item>@string/vehicle_profile_jaguar_auto</item>
         <item>@string/vehicle_profile_jaguar_x200</item>
         <item>@string/vehicle_profile_jaguar_x202</item>
+        <item>@string/vehicle_profile_volvo_p2</item>
+        <item>@string/vehicle_profile_volvo_spa</item>
     </string-array>
     <string-array name="vehicle_profile_values" translatable="false">
         <item>standard</item>
@@ -525,6 +527,8 @@ period of time while the ECU recalibrates itself.
         <item>jaguar_stype_auto</item>
         <item>jaguar_stype_x200</item>
         <item>jaguar_stype_x202</item>
+        <item>volvo_xc90_p2</item>
+        <item>volvo_xc90_spa</item>
     </string-array>
     <string name="vehicle_scan_module">Scan module</string>
     <string name="vehicle_scanning_fmt">Scanning %s…</string>
