@@ -597,14 +597,15 @@ public final class JaguarStypeProfile implements VehicleProfileHandler
     @Override
     public String getDtcGuidance(String code)
     {
-        // Source is MY2001–2002; never silently apply it to later X202 ECUs.
-        if (!isEnabled() || activeProfile == Profile.STYPE_X202 || code == null) return "";
-        String key = "jag_dtc_causes_" + code.trim().toUpperCase(Locale.US);
-        String causes = Messages.getString(key, "");
-        if (causes.isEmpty()) return "";
+        if (!isEnabled()) return "";
+        String full = JaguarManualReference.forCode(code);
+        if (full.isEmpty() || activeProfile == Profile.STYPE_X202) return full;
+        // Retain the previously reviewed EN/RU summaries, with their narrower scope.
+        String summary = Messages.getString("jag_dtc_causes_" + code.trim().toUpperCase(Locale.US), "");
+        if (summary.isEmpty()) return full;
         return Messages.getString("jag_dtc_causes_scope") + "\n"
-                + Messages.getString("jag_dtc_causes_heading") + " " + causes + "\n"
-                + Messages.getString("jag_dtc_causes_caution");
+                + Messages.getString("jag_dtc_causes_heading") + " " + summary + "\n"
+                + Messages.getString("jag_dtc_causes_caution") + "\n\n" + full;
     }
 
     @Override

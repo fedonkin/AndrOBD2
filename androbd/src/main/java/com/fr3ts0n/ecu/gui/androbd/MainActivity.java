@@ -2964,6 +2964,10 @@ public class MainActivity extends PluginManager
             return true;
         }
 
+        if (id == R.id.jaguar_manual) {
+            startActivity(new Intent(this, JaguarManualActivity.class));
+            return true;
+        }
         if (id == R.id.open_csv_log) {
             startActivity(new Intent(this, LogViewerActivity.class));
             return true;
@@ -3412,6 +3416,11 @@ public class MainActivity extends PluginManager
                 {
                     intent = new Intent(Intent.ACTION_WEB_SEARCH);
                     EcuCodeItem dfc = (EcuCodeItem) getListAdapter().getItem(position);
+                    if (VehicleProfileManager.isBrandActive("jaguar")) {
+                        startActivity(new Intent(this, JaguarManualActivity.class).putExtra("code",
+                                String.valueOf(dfc.get(EcuCodeItem.FID_CODE))));
+                        break;
+                    }
                     intent.putExtra(SearchManager.QUERY,
                             "OBD " + dfc.get(EcuCodeItem.FID_CODE));
                     startActivity(intent);

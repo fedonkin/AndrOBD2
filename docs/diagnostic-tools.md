@@ -45,3 +45,10 @@ Two generation-specific profiles, a small EN/RU Volvo P-code reference, and
 read-only experimental CAN Mode 22 candidates are documented in
 [volvo-xc90.md](volvo-xc90.md). This is not full VIDA/D2/DoIP coverage;
 read the generation, transport and source-validation limits before use.
+
+## Full Jaguar document reference
+
+The complete supplied 309-page STYPE.pdf is now bundled with offline full-text
+search, 1375 structured DTC records, year/system filters and original-page zoom.
+See [jaguar-dtc-guidance.md](jaguar-dtc-guidance.md) for coverage, model/VIN scope,
+language and the distinction between source information and executable diagnostics.

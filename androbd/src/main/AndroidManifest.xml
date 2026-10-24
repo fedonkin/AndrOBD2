@@ -79,6 +79,8 @@
             android:label="@string/select_ble_device"
             android:exported="true"
             tools:targetApi="21" />
+        <activity android:name=".JaguarManualActivity" android:exported="false" android:label="@string/jag_manual_title" />
+        <activity android:name=".JaguarManualPageActivity" android:exported="false" android:label="@string/jag_manual_title" />
         <activity android:name=".LogViewerActivity" android:exported="false" android:label="@string/log_viewer" />
         <activity
             android:name=".ChartActivity"

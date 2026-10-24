@@ -157,7 +157,7 @@ public class DiagnosticReportBuilderTest
             String report = DiagnosticReportBuilder.buildFaultReport(0L, 1,
                     Collections.singletonList(code), Collections.emptyList(),
                     Collections.emptyList(), sampleLabels());
-            assertTrue(report.contains("Возможные причины (не диагноз)"));
+            assertTrue(report.contains("Возможные причины — не диагноз"));
             assertTrue(report.contains("L86902"));
             VehicleProfileManager.setProfileByKey("standard", pvs);
             report = DiagnosticReportBuilder.buildFaultReport(0L, 1,

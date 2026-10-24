@@ -135,7 +135,8 @@ public class DfcItemAdapter extends ObdItemAdapter
 			Object modObj = VehicleProfileManager.isCustomProfileActive()
 					? currPv.get(VehicleProfileManager.CODE_FIELD_MODULE)
 					: null;
-			String hint = getContext().getString(R.string.long_press_dfc_hint);
+			String hint = getContext().getString(VehicleProfileManager.isBrandActive("jaguar")
+                    ? R.string.jag_manual_dtc_hint : R.string.long_press_dfc_hint);
 			if (modObj != null && !String.valueOf(modObj).trim().isEmpty())
 			{
 				tvSublabel.setText("[" + String.valueOf(modObj).trim() + "] · " + hint);
