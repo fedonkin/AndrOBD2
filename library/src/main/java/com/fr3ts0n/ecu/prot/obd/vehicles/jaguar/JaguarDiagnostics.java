@@ -40,10 +40,13 @@ public final class JaguarDiagnostics {
         if("All".equals(range))return true;
         return year>=Integer.parseInt(years[0])&&year<=Integer.parseInt(years[years.length-1]);
     }
-    private static final class Data {
+    private static final class RecordData {
         static final List<Record> RECORDS=records();
-        static final List<Topic> TOPICS=topics();
         static List<Record> records(){List<Record> a=new ArrayList<Record>();for(String[] c:read("diagnostic_records.tsv"))a.add(new Record(c));return Collections.unmodifiableList(a);}
+    }
+    // DTC lookup must not eagerly parse all 309 technical text units on the UI thread.
+    private static final class TopicData {
+        static final List<Topic> TOPICS=topics();
         static List<Topic> topics(){List<Topic>a=new ArrayList<Topic>();for(String[] c:read("diagnostic_topics.tsv"))a.add(new Topic(c));return Collections.unmodifiableList(a);}
     }
     private static List<String[]> read(String name) {
@@ -64,11 +67,11 @@ public final class JaguarDiagnostics {
         }
         return out.toString();
     }
-    public static List<Record> allRecords(){return Data.RECORDS;}
-    public static List<Topic> allTopics(){return Data.TOPICS;}
+    public static List<Record> allRecords(){return RecordData.RECORDS;}
+    public static List<Topic> allTopics(){return TopicData.TOPICS;}
     public static List<Record> find(String code,int year) {
         List<Record> out=new ArrayList<Record>();if(code==null)return out;
-        for(Record r:Data.RECORDS)if(r.code.equalsIgnoreCase(code.trim())&&r.applies(year))out.add(r);
+        for(Record r:RecordData.RECORDS)if(r.code.equalsIgnoreCase(code.trim())&&r.applies(year))out.add(r);
         return out;
     }
     public static String label(String key) {
@@ -90,7 +93,7 @@ public final class JaguarDiagnostics {
     }
     public static String guidance(String code) {
         if(code==null)return "";
-        boolean known=false;for(Record r:Data.RECORDS)if(r.code.equalsIgnoreCase(code.trim())){known=true;break;}
+        boolean known=false;for(Record r:RecordData.RECORDS)if(r.code.equalsIgnoreCase(code.trim())){known=true;break;}
         if(!known)return "";
         boolean ru="ru".equals(Locale.getDefault().getLanguage());
         int year=modelYear;

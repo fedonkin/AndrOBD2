@@ -57,8 +57,10 @@ public class JaguarDiagnosticsActivity extends AppCompatActivity {
     private Spinner spinner(LinearLayout root,String[] entries){Spinner s=new Spinner(this);
         ArrayAdapter<String>a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,entries);a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);s.setAdapter(a);root.addView(s);return s;}
     private void refresh(){
+        // ArrayAdapter otherwise notifies once per added row (hundreds per keystroke).
+        adapter.setNotifyOnChange(false);
         visible.clear();adapter.clear();int y=JaguarDiagnostics.getModelYear();
-        if(y<2000||y>2003){scope.setText(y==0?R.string.jag_diag_choose_year:R.string.jag_diag_unavailable);return;}
+        if(y<2000||y>2003){scope.setText(y==0?R.string.jag_diag_choose_year:R.string.jag_diag_unavailable);adapter.notifyDataSetChanged();return;}
         String q=search.getText().toString().trim().toLowerCase(Locale.ROOT),part=sections[section.getSelectedItemPosition()];
         if(mode.getSelectedItemPosition()==0){
             for(JaguarDiagnostics.Record r:JaguarDiagnostics.allRecords()){
@@ -75,6 +77,7 @@ public class JaguarDiagnosticsActivity extends AppCompatActivity {
                 visible.add(t);adapter.add(t.title+" · "+t.years+"\n"+t.section);
             }
         }
+        adapter.notifyDataSetChanged();
         scope.setText(getString(R.string.jag_diag_count,visible.size())+"\n"+getString(R.string.jag_diag_scope));
     }
     private void detail(Object item){

@@ -186,8 +186,7 @@ public class LiveDataRecorder
     private boolean recording = false;
     private long sessionStartWallMs = 0L;
     private long sessionStopWallMs = 0L;
-    private long firstSampleWallMs = -1L;
-    private long startElapsedRealtimeMs = 0L;
+    private long startElapsedRealtimeMs = -1L;
     private long nextTickElapsedMs = 0L;
     private String lastSavedFilePath = null;
     private int markerCount = 0;
@@ -250,7 +249,6 @@ public class LiveDataRecorder
         this.recording = true;
         this.sessionStartWallMs = System.currentTimeMillis();
         this.sessionStopWallMs = 0L;
-        this.firstSampleWallMs = -1L;
         this.startElapsedRealtimeMs = SystemClock.elapsedRealtime();
         this.nextTickElapsedMs = this.startElapsedRealtimeMs + SAMPLE_INTERVAL_MS;
 
@@ -269,11 +267,16 @@ public class LiveDataRecorder
      */
     synchronized void startForTest(long startWallMs)
     {
+        startForTest(startWallMs, -1L);
+    }
+
+    synchronized void startForTest(long startWallMs, long startMonotonicMs)
+    {
         clearLocked();
+        this.startElapsedRealtimeMs = startMonotonicMs;
         this.recording = true;
         this.sessionStartWallMs = startWallMs;
         this.sessionStopWallMs = 0L;
-        this.firstSampleWallMs = -1L;
     }
 
     /**
@@ -319,12 +322,13 @@ public class LiveDataRecorder
     {
         columns.clear();
         rows.clear();
-        firstSampleWallMs = -1L;
         sessionStartWallMs = 0L;
         sessionStopWallMs = 0L;
         lastSavedFilePath = null;
         markerCount = 0;
         pendingMarker = "";
+        startElapsedRealtimeMs = -1L;
+        nextTickElapsedMs = 0L;
     }
 
     /**
@@ -434,7 +438,7 @@ public class LiveDataRecorder
     {
         if (recording)
         {
-            if (startElapsedRealtimeMs > 0L)
+            if (startElapsedRealtimeMs >= 0L)
             {
                 try
                 {
@@ -470,7 +474,18 @@ public class LiveDataRecorder
         return captureFromSourceLocked(wallTimeMs);
     }
 
+    synchronized boolean captureSnapshotAt(long wallTimeMs, long monotonicMs)
+    {
+        return captureFromSourceLocked(wallTimeMs, monotonicMs);
+    }
+
     private boolean captureFromSourceLocked(long wallTimeMs)
+    {
+        return captureFromSourceLocked(wallTimeMs,
+                startElapsedRealtimeMs >= 0L ? SystemClock.elapsedRealtime() : -1L);
+    }
+
+    private boolean captureFromSourceLocked(long wallTimeMs, long monotonicMs)
     {
         if (dataSource == null) return false;
 
@@ -500,11 +515,11 @@ public class LiveDataRecorder
             return false;
         }
 
-        if (firstSampleWallMs < 0L)
-        {
-            firstSampleWallMs = wallTimeMs;
-        }
-        long elapsedSec = Math.max(0L, Math.round((wallTimeMs - firstSampleWallMs) / 1000.0));
+        // The Record button, not the first PID response, starts the timeline.
+        // Wall-clock corrections must never distort the duration of a live session.
+        long elapsedMs = startElapsedRealtimeMs >= 0L && monotonicMs >= startElapsedRealtimeMs
+                ? monotonicMs - startElapsedRealtimeMs : wallTimeMs - sessionStartWallMs;
+        long elapsedSec = Math.max(0L, elapsedMs / 1000L);
         if (!rows.isEmpty())
         {
             long prevSec = rows.get(rows.size() - 1).elapsedSec;

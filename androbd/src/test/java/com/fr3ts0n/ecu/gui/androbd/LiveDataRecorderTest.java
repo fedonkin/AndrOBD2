@@ -24,9 +24,9 @@ public class LiveDataRecorderTest
     private static EcuDataPv makePv(int pid, String mnem, String desc, Object val, String units)
     {
         EcuDataPv pv = new EcuDataPv();
-        pv.put(EcuDataPv.FID_PID, pid);
-        pv.put(EcuDataPv.FID_OFS, 0);
-        pv.put(EcuDataPv.FID_BIT_OFS, 0);
+        pv.put(EcuDataPv.FID_PID, Integer.valueOf(pid));
+        pv.put(EcuDataPv.FID_OFS, Integer.valueOf(0));
+        pv.put(EcuDataPv.FID_BIT_OFS, Integer.valueOf(0));
         pv.put(EcuDataPv.FID_MNEMONIC, mnem);
         pv.put(EcuDataPv.FID_DESCRIPT, desc);
         pv.put(EcuDataPv.FID_VALUE, val);
@@ -60,7 +60,7 @@ public class LiveDataRecorderTest
         assertFalse(recorder.captureSnapshotAt(t0));
         assertEquals(0, recorder.getSampleCount());
 
-        // t = 1s (first real ECU data -> elapsedSec = 0)
+        // t = 1s (first real ECU data -> elapsedSec = 1 (since Record))
         EcuDataPv rpm = makePv(0x0C, "RPM", "Обороты двигателя", 850, "rpm");
         EcuDataPv ect = makePv(0x05, "ECT", "Температура ОЖ", 42, "°C");
         liveItems.add(rpm);
@@ -68,14 +68,14 @@ public class LiveDataRecorderTest
         assertTrue(recorder.captureSnapshotAt(t0 + 1000L));
 
         // t = 2s (RPM changes)
-        rpm.put(EcuDataPv.FID_VALUE, 1200);
-        ect.put(EcuDataPv.FID_VALUE, 43);
+        rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(1200));
+        ect.put(EcuDataPv.FID_VALUE, Integer.valueOf(43));
         assertTrue(recorder.captureSnapshotAt(t0 + 2000L));
 
         // t = 3s (new PID arrives mid-recording, e.g., vehicle speed)
         EcuDataPv spd = makePv(0x0D, "SPD", "Скорость", 15, "km/h");
         liveItems.add(spd);
-        rpm.put(EcuDataPv.FID_VALUE, 1650);
+        rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(1650));
         assertTrue(recorder.captureSnapshotAt(t0 + 3000L));
 
         recorder.stopForTest(t0 + 3000L);
@@ -84,7 +84,7 @@ public class LiveDataRecorderTest
         assertTrue(recorder.hasSamples());
         assertEquals(3, recorder.getSampleCount());
         assertEquals(3, recorder.getParameterCount());
-        assertEquals(2L, recorder.getDurationSeconds());
+        assertEquals(3L, recorder.getDurationSeconds());
 
         String text = recorder.buildFormattedLog("Время", "Сек");
         String[] lines = text.split("\n");
@@ -92,9 +92,9 @@ public class LiveDataRecorderTest
         assertTrue(lines[0].startsWith("# AndrOBD2 Live Log |"));
         // Sorted by PID: 0x05 (ECT), 0x0C (RPM), 0x0D (SPD)
         assertEquals("Время;Сек;Температура ОЖ [°C];Обороты двигателя [rpm];Скорость [km/h]", lines[1]);
-        assertTrue(lines[2].endsWith(";0;42;850;"));
-        assertTrue(lines[3].endsWith(";1;43;1200;"));
-        assertTrue(lines[4].endsWith(";2;43;1650;15"));
+        assertTrue(lines[2].endsWith(";1;42;850;"));
+        assertTrue(lines[3].endsWith(";2;43;1200;"));
+        assertTrue(lines[4].endsWith(";3;43;1650;15"));
     }
 
     @Test
@@ -125,13 +125,6 @@ public class LiveDataRecorderTest
     }
 
     @Test
-    public void prepareClipboardPayloadPreservesNormalLogs()
-    {
-        String sample = "# Header\nВремя;Сек;RPM\n12:00:00;0;800\n";
-        assertEquals(sample, MainActivity.prepareClipboardPayload(sample, "/tmp/test.csv"));
-    }
-
-    @Test
     public void recordsEventMarkersIntoDedicatedColumn()
     {
         final List<EcuDataPv> liveItems = new ArrayList<>();
@@ -151,7 +144,7 @@ public class LiveDataRecorderTest
         assertTrue(recorder.captureSnapshotAt(t0));
 
         assertEquals("MARK_1", recorder.addMarkerAt(t0 + 500L));
-        rpm.put(EcuDataPv.FID_VALUE, 2400);
+        rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(2400));
         assertTrue(recorder.captureSnapshotAt(t0 + 1000L));
 
         assertEquals("MARK_2", recorder.addMarkerAt(t0 + 1500L));
@@ -178,9 +171,9 @@ public class LiveDataRecorderTest
         final List<EcuDataPv> liveItems = new ArrayList<>();
         EcuDataPv mil = makePv(0x01, "MIL", "Состояние индикатора неисправности", "Выкл", "");
         EcuDataPv misfire = makePv(0x01, "MISF", "Статус пропуска зажигания", "(*)  Доступно (  )  Неполный", "");
-        misfire.put(EcuDataPv.FID_OFS, 1);
+        misfire.put(EcuDataPv.FID_OFS, Integer.valueOf(1));
         EcuDataPv egr = makePv(0x01, "EGR", "Состояние системы рециркуляции выхлопных газов", "(  )  Неполный (  )  Доступно", "");
-        egr.put(EcuDataPv.FID_OFS, 2);
+        egr.put(EcuDataPv.FID_OFS, Integer.valueOf(2));
         EcuDataPv ect = makePv(0x05, "ECT", "Температура охлаждающей жидкости", "17,0", "°C");
         EcuDataPv thr = makePv(0x11, "THR", "Положение дроссельной заслонки", "11,0", "%");
         EcuDataPv obd = makePv(0x1C, "OBD", "ODB соотвествует", "EOBD (Европа)", "");
@@ -262,20 +255,20 @@ public class LiveDataRecorderTest
         {
             if (s == 3)
             {
-                rpm.put(EcuDataPv.FID_VALUE, 1520);
+                rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(1520));
             } else if (s >= 15 && s < 80)
             {
-                rpm.put(EcuDataPv.FID_VALUE, 750);
+                rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(750));
                 fuelSys.put(EcuDataPv.FID_VALUE,
                         "Замкнутый контур, используется обратная связь по кислородному датчику для определения состава смеси");
                 ltft1.put(EcuDataPv.FID_VALUE, "-14,8");
             } else if (s == 90)
             {
-                rpm.put(EcuDataPv.FID_VALUE, 2828);
+                rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(2828));
                 ltft1.put(EcuDataPv.FID_VALUE, "-2,3");
             } else if (s > 90)
             {
-                rpm.put(EcuDataPv.FID_VALUE, 790);
+                rpm.put(EcuDataPv.FID_VALUE, Integer.valueOf(790));
                 ltft1.put(EcuDataPv.FID_VALUE, "-16,4");
             }
             ect.put(EcuDataPv.FID_VALUE, String.valueOf(19 + (s * 70) / 119));

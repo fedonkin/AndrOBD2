@@ -185,34 +185,36 @@ public final class CsvLogParser
         long dayRolloverMs = 0L;
         long prevClockMs = -1L;
 
+        long[] clockTimestamps = new long[rawRows.size()];
+        for (int r = 0; r < rawRows.size(); r++) {
+            long clock = colTime >= 0 ? parseClockTimeOfDayMs(rawRows.get(r)[colTime]) : -1L;
+            clockTimestamps[r] = -1L;
+            if (clock >= 0) {
+                if (prevClockMs >= 0 && clock + 3_600_000L < prevClockMs) dayRolloverMs += 86_400_000L;
+                prevClockMs = clock;
+                clockTimestamps[r] = baseDayMs + dayRolloverMs + clock;
+            }
+        }
+        // Prefer elapsed seconds over wall time (NTP/manual clock changes).
+        // Anchor once, accounting for midnight even if preceding rows lack seconds.
+        long elapsedOrigin = baseDayMs;
+        if (colSec >= 0) {
+            for (int r = 0; r < rawRows.size(); r++) {
+                long elapsed = parseElapsedMs(rawRows.get(r)[colSec]);
+                if (elapsed >= 0 && clockTimestamps[r] >= 0) {
+                    elapsedOrigin = clockTimestamps[r] - elapsed;
+                    break;
+                }
+            }
+        }
         for (int r = 0; r < rawRows.size(); r++)
         {
             String[] row = rawRows.get(r);
-            long ts = -1L;
-            if (colTime >= 0 && colTime < row.length)
-            {
-                long clockOfDay = parseClockTimeOfDayMs(row[colTime]);
-                if (clockOfDay >= 0L)
-                {
-                    if (prevClockMs >= 0L && clockOfDay + 3600_000L < prevClockMs)
-                    {
-                        dayRolloverMs += 86_400_000L;
-                    }
-                    prevClockMs = clockOfDay;
-                    ts = baseDayMs + dayRolloverMs + clockOfDay;
-                }
-            }
-            if (ts < 0L && colSec >= 0 && colSec < row.length)
-            {
-                double sec = parseNumber(row[colSec], delimiter == ',');
-                if (!Double.isNaN(sec))
-                {
-                    ts = baseDayMs + Math.round(sec * 1000.0);
-                }
-            }
+            long elapsed = colSec >= 0 ? parseElapsedMs(row[colSec]) : -1L;
+            long ts = elapsed >= 0 ? elapsedOrigin + elapsed : clockTimestamps[r];
             if (ts < 0L)
             {
-                ts = baseDayMs + r * 1000L;
+                ts = r > 0 ? rowTimestamps[r - 1] + 1000L : baseDayMs;
             }
             // Ensure strictly non-decreasing timestamps for binary search in ModernChartView
             if (r > 0 && ts < rowTimestamps[r - 1])
@@ -280,17 +282,6 @@ public final class CsvLogParser
         long startMs = rawRows.isEmpty() ? 0L : rowTimestamps[0];
         long endMs = rawRows.isEmpty() ? 0L : rowTimestamps[rawRows.size() - 1];
         long durSec = Math.max(0L, Math.round((endMs - startMs) / 1000.0));
-        if (colSec >= 0 && !rawRows.isEmpty())
-        {
-            String[] first = rawRows.get(0);
-            String[] last = rawRows.get(rawRows.size() - 1);
-            double s0 = colSec < first.length ? parseNumber(first[colSec], commaIsDelimiter) : Double.NaN;
-            double sN = colSec < last.length ? parseNumber(last[colSec], commaIsDelimiter) : Double.NaN;
-            if (!Double.isNaN(s0) && !Double.isNaN(sN) && sN >= s0)
-            {
-                durSec = Math.round(sN - s0);
-            }
-        }
 
         return new ParsedCsvLog(headers, rawRows, numericColumns, markers, startMs, endMs, durSec);
     }
@@ -408,6 +399,14 @@ public final class CsvLogParser
         return new String[]{fullHeader.trim(), ""};
     }
 
+    private static long parseElapsedMs(String raw)
+    {
+        double seconds = parseNumber(raw, false);
+        // Bound external CSV input to avoid overflowing long timestamp arithmetic.
+        if (Double.isNaN(seconds) || seconds < 0 || seconds > 100 * 366 * 86400L) return -1L;
+        return Math.round(seconds * 1000.0);
+    }
+
     private static long parseClockTimeOfDayMs(String raw)
     {
         if (raw == null) return -1L;
@@ -418,13 +417,13 @@ public final class CsvLogParser
             s = s.substring(space + 1);
         }
         String[] parts = s.split(":");
-        if (parts.length < 2) return -1L;
+        if (parts.length < 2 || parts.length > 3) return -1L;
         try
         {
             int hh = Integer.parseInt(parts[0].trim());
             int mm = Integer.parseInt(parts[1].trim());
             double ss = parts.length >= 3 ? Double.parseDouble(parts[2].trim().replace(',', '.')) : 0.0;
-            if (hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss >= 60.5) return -1L;
+            if (hh < 0 || hh > 23 || mm < 0 || mm > 59 || Double.isNaN(ss) || Double.isInfinite(ss) || ss < 0 || ss >= 60) return -1L;
             return (hh * 3600L + mm * 60L) * 1000L + Math.round(ss * 1000.0);
         } catch (NumberFormatException e)
         {
