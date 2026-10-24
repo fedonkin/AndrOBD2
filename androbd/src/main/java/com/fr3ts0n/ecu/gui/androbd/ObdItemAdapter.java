@@ -415,8 +415,10 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             }
         }
 
+        // ListView reuses rows: always reset severity, including empty/non-numeric values.
         if (currPv == null)
         {
+            convertView.setBackgroundResource(R.drawable.bg_data_item);
             return convertView;
         }
 
@@ -459,13 +461,17 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 ? ColorAdapter.getItemColor((EcuDataPv) currPv)
                 : ColorAdapter.getItemColor(position);
 
+        Conversion valueConversion = null;
+        if (cnvObj instanceof Conversion[]) {
+            Conversion[] conversions = (Conversion[]) cnvObj;
+            if (EcuDataItem.cnvSystem >= 0 && EcuDataItem.cnvSystem < conversions.length)
+                valueConversion = conversions[EcuDataItem.cnvSystem];
+        }
         boolean ru = Locale.getDefault().getLanguage().toLowerCase(Locale.US).startsWith("ru");
         LiveHealthEvaluator.HealthStatus health = LiveHealthEvaluator.HealthStatus.NORMAL;
         if (colVal instanceof Number
-                && !(cnvObj instanceof Conversion[]
-                && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] instanceof BitmapConversion)
-                && !(cnvObj instanceof Conversion[]
-                && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] instanceof HashConversion))
+                && !(valueConversion instanceof BitmapConversion)
+                && !(valueConversion instanceof HashConversion))
         {
             health = LiveHealthEvaluator.evaluate(
                     pidNum, activeUi != null ? activeUi.getHealthCategory(mnemonic) : mnemonic,
@@ -478,16 +484,20 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                     health.severity == LiveHealthEvaluator.Severity.ALERT
                             ? R.color.status_danger
                             : R.color.status_demo);
+            convertView.setBackgroundResource(health.severity == LiveHealthEvaluator.Severity.ALERT
+                    ? R.drawable.bg_data_item_alert : R.drawable.bg_data_item_warning);
             holder.tvValue.setTextColor(statusColor);
             tintViewBackground(holder.itemAccent, statusColor);
-            String combinedSub = (baseSublabel != null && !baseSublabel.isEmpty())
-                    ? (baseSublabel + " · " + health.shortHint)
-                    : health.shortHint;
+            // Show the actionable observation first, not behind a long OEM mnemonic.
+            String combinedSub = (health.severity == LiveHealthEvaluator.Severity.ALERT
+                    ? getContext().getString(R.string.live_health_alert)
+                    : getContext().getString(R.string.live_health_warning)) + ": " + health.shortHint;
             holder.tvSublabel.setText(combinedSub);
             holder.tvSublabel.setTextColor(statusColor);
             holder.tvSublabel.setVisibility(View.VISIBLE);
         } else
         {
+            convertView.setBackgroundResource(R.drawable.bg_data_item);
             tintViewBackground(holder.itemAccent, pidColor);
             if (baseSublabel != null)
             {
@@ -502,10 +512,9 @@ class ObdItemAdapter extends ArrayAdapter<Object>
         boolean isDiscreteConversion = false;
         try
         {
-            if (cnvObj instanceof Conversion[]
-                    && ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem] != null)
+            if (valueConversion != null)
             {
-                Conversion cnv = ((Conversion[]) cnvObj)[EcuDataItem.cnvSystem];
+                Conversion cnv = valueConversion;
                 isDiscreteConversion = (cnv instanceof BitmapConversion || cnv instanceof HashConversion);
                 fmtText = cnv.physToPhysFmtString((Number) colVal,
                         (String) currPv.get(EcuDataPv.FID_FORMAT));
@@ -526,7 +535,8 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 Drawable progDrawable = holder.progressBar.getProgressDrawable();
                 if (progDrawable != null)
                 {
-                    progDrawable.mutate().setColorFilter(pidColor, PorterDuff.Mode.SRC_IN);
+                    progDrawable.mutate().setColorFilter(health.severity == LiveHealthEvaluator.Severity.NORMAL
+                            ? pidColor : holder.tvValue.getCurrentTextColor(), PorterDuff.Mode.SRC_IN);
                 }
                 double ratio = (((Number) colVal).doubleValue() - min.doubleValue())
                         / (max.doubleValue() - min.doubleValue());
@@ -546,9 +556,10 @@ class ObdItemAdapter extends ArrayAdapter<Object>
                 || Double.isInfinite(((Number)colVal).doubleValue()))) {
             fmtText = "—"; holder.progressBar.setVisibility(View.GONE);
         }
-        boolean useWideTextRow = (!(colVal instanceof Number) || isDiscreteConversion)
-                && fmtText != null
-                && fmtText.length() > 12;
+        boolean useWideTextRow = fmtText != null && (
+                ((!(colVal instanceof Number) || isDiscreteConversion) && fmtText.length() > 12)
+                || fmtText.length() > 9
+                || getContext().getResources().getConfiguration().fontScale >= 1.3f);
 
         if (useWideTextRow)
         {
@@ -556,6 +567,7 @@ class ObdItemAdapter extends ArrayAdapter<Object>
             if (holder.tvValueWide != null)
             {
                 String fullWide = hasUnits ? (fmtText + " " + units.trim()) : fmtText;
+                holder.tvValueWide.setTextColor(holder.tvValue.getCurrentTextColor());
                 holder.tvValueWide.setText(fullWide);
                 holder.tvValueWide.setVisibility(View.VISIBLE);
             }

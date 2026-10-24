@@ -5,8 +5,9 @@ import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import java.util.Locale;
 
 /**
- * Evaluates real-time Live Data sensor values against universal diagnostic thresholds
- * to provide subtle, non-intrusive health indicators (Normal / Warning / Alert) in {@link ObdItemAdapter}.
+ * Flags conservative observations for supported Live Data categories and known units.
+ * Thresholds are screening hints, not OEM limits or diagnoses; NORMAL also means unassessed.
+ * Provides row indicators (Normal / Warning / Alert) in {@link ObdItemAdapter}.
  */
 public final class LiveHealthEvaluator
 {
@@ -45,8 +46,12 @@ public final class LiveHealthEvaluator
         String mnem = mnemonic != null ? mnemonic.trim().toLowerCase(Locale.ROOT) : "";
         String unitStr = units != null ? units.trim() : "";
 
+        // Never interpret unknown units as Celsius, percent or volts.
+        boolean percent = "%".equals(unitStr);
+        boolean volts = "V".equalsIgnoreCase(unitStr);
+
         // 1. Short-term & Long-term Fuel Trims (PIDs 0x06..0x09)
-        if (pid >= 0x06 && pid <= 0x09)
+        if (pid >= 0x06 && pid <= 0x09 && percent)
         {
             if (Math.abs(value - 99.2) < 0.5)
             {
@@ -72,8 +77,8 @@ public final class LiveHealthEvaluator
         }
 
         // 2. Combined Total Fuel Trim STFT + LTFT (0xFF02 / 0xFF03)
-        if (pid == ObdProt.VPID_TOTAL_TRIM_B1 || pid == ObdProt.VPID_TOTAL_TRIM_B2
-                || "calc_total_trim_b1".equals(mnem) || "calc_total_trim_b2".equals(mnem))
+        if (percent && (pid == ObdProt.VPID_TOTAL_TRIM_B1 || pid == ObdProt.VPID_TOTAL_TRIM_B2
+                || "calc_total_trim_b1".equals(mnem) || "calc_total_trim_b2".equals(mnem)))
         {
             if (value <= -20.0)
             {
@@ -100,7 +105,7 @@ public final class LiveHealthEvaluator
             double tempC = toCelsius(value, unitStr);
             if (tempC >= 112.0)
             {
-                return new HealthStatus(Severity.ALERT, ru ? "ПЕРЕГРЕВ ОЖ!" : "OVERHEAT!");
+                return new HealthStatus(Severity.ALERT, ru ? "очень высокая t° ОЖ" : "very high coolant temp");
             }
             if (tempC >= 105.0)
             {
@@ -115,7 +120,7 @@ public final class LiveHealthEvaluator
             double tempC = toCelsius(value, unitStr);
             if (tempC >= 118.0)
             {
-                return new HealthStatus(Severity.ALERT, ru ? "перегрев АКПП!" : "ATF overheat!");
+                return new HealthStatus(Severity.ALERT, ru ? "очень высокая t° АКПП" : "very high ATF temp");
             }
             if (tempC >= 105.0)
             {
@@ -130,7 +135,7 @@ public final class LiveHealthEvaluator
             double tempC = toCelsius(value, unitStr);
             if (tempC >= 128.0)
             {
-                return new HealthStatus(Severity.ALERT, ru ? "перегрев масла!" : "oil overheat!");
+                return new HealthStatus(Severity.ALERT, ru ? "очень высокая t° масла" : "very high oil temp");
             }
             if (tempC >= 118.0)
             {
@@ -140,10 +145,10 @@ public final class LiveHealthEvaluator
         }
 
         // 6. Board / ECU Supply Voltage
-        if (pid == 0x42 || pid == ObdProt.VPID_ADAPTER_VOLTAGE
+        if (volts && (pid == 0x42 || pid == ObdProt.VPID_ADAPTER_VOLTAGE
                 || "ecu_voltage".equals(mnem)
                 || "adapter_voltage".equals(mnem)
-                || "supply_voltage".equals(mnem))
+                || "supply_voltage".equals(mnem)))
         {
             if (value > 1.0)
             {
@@ -178,10 +183,10 @@ public final class LiveHealthEvaluator
 
     private static double toCelsius(double val, String unitStr)
     {
-        if (unitStr.contains("F") || unitStr.contains("f"))
-        {
-            return (val - 32.0) * 5.0 / 9.0;
-        }
-        return val;
+        String unit = unitStr.replace("°", "").trim();
+        if ("F".equalsIgnoreCase(unit)) return (val - 32.0) * 5.0 / 9.0;
+        if ("C".equalsIgnoreCase(unit) || "℃".equals(unitStr)) return val;
+        if ("℉".equals(unitStr)) return (val - 32.0) * 5.0 / 9.0;
+        return Double.NaN;
     }
 }

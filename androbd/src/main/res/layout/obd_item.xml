@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:minHeight="72dp"
     android:background="@drawable/bg_data_item"
     android:orientation="vertical">
 
@@ -42,9 +43,7 @@
                 android:id="@+id/obd_label"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:lineSpacingExtra="1dp"
-                android:maxLines="2"
+                android:lineSpacingExtra="2dp"
                 android:textColor="@color/text_primary"
                 android:textSize="13.5sp" />
 
@@ -65,9 +64,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/text_tertiary"
+                android:lineSpacingExtra="2dp"
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:visibility="gone" />
         </LinearLayout>
@@ -104,11 +102,11 @@
 
         <ImageView
             android:id="@+id/iv_fav_star"
-            android:layout_width="34dp"
-            android:layout_height="34dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:layout_marginStart="4dp"
             android:contentDescription="@string/fav_toggle_desc"
-            android:padding="7dp"
+            android:padding="12dp"
             android:src="@drawable/ic_star_outline"
             android:visibility="gone" />
     </LinearLayout>

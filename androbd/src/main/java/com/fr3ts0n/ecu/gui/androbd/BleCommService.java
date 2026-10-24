@@ -96,6 +96,11 @@ public class BleCommService
     private final Handler bleWatchdogHandler = new Handler(Looper.getMainLooper());
     private String message = "";
 
+    private final Runnable connectTimeoutRunnable = () -> {
+        synchronized (BleCommService.this) {
+            if (!stopping && getState() == STATE.CONNECTING) connectionFailed();
+        }
+    };
     private final Runnable cccdTimeoutRunnable = this::completeBleHandshakeIfPending;
     private final Runnable writeTimeoutRunnable = () -> {
         synchronized (txQueue)
@@ -128,6 +133,7 @@ public class BleCommService
             txQueue.clear();
             writeInFlight = false;
             gattReady = false;
+            pendingDeviceName = null;
         }
         if (gatt != null)
         {
@@ -205,9 +211,10 @@ public class BleCommService
         }
     }
 
-    private void completeBleHandshakeIfPending()
+    private synchronized void completeBleHandshakeIfPending()
     {
         bleWatchdogHandler.removeCallbacks(cccdTimeoutRunnable);
+        bleWatchdogHandler.removeCallbacks(connectTimeoutRunnable);
         String nameToNotify;
         synchronized (txQueue)
         {
@@ -287,31 +294,22 @@ public class BleCommService
 
     @Override
     @SuppressLint("MissingPermission")
-    public void connect(Object device, boolean secure)
+    public synchronized void connect(Object device, boolean secure)
     {
+        stop();
         stopping = false;
-        synchronized (txQueue)
-        {
-            txQueue.clear();
-            writeInFlight = false;
-            gattReady = false;
-        }
         message = "";
-        if (gatt != null)
-        {
-            try
-            {
-                gatt.close();
-            } catch (Exception ignored)
-            {
-            }
-            gatt = null;
-        }
-        mDevice = (BluetoothDevice) device;
-        String devName = mDevice.getName();
-        log.info("BLE connect to " + mDevice.getAddress() + " (" + devName + ")");
+        elm.addTelegramWriter(this);
         setState(STATE.CONNECTING);
-        gatt = mDevice.connectGatt(mContext, false, bluetoothGattCallback, BluetoothDevice.TRANSPORT_LE);
+        try {
+            mDevice = (BluetoothDevice) device;
+            gatt = mDevice.connectGatt(mContext, false, bluetoothGattCallback, BluetoothDevice.TRANSPORT_LE);
+            if (gatt == null) connectionFailed();
+            else bleWatchdogHandler.postDelayed(connectTimeoutRunnable, 10_000L);
+        } catch (SecurityException | IllegalArgumentException e) {
+            log.warning(String.valueOf(e.getMessage()));
+            connectionFailed();
+        }
     }
 
     private final BluetoothGattCallback bluetoothGattCallback = new BluetoothGattCallback()
@@ -322,41 +320,35 @@ public class BleCommService
                                             int status,
                                             int newState)
         {
-            log.fine(String.format(Locale.US, "onConnectionStateChange: %d, %d", status, newState));
-            if (stopping)
-            {
-                try
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
+
+                log.fine(String.format(Locale.US, "onConnectionStateChange: %d, %d", status, newState));
+                if (newState == BluetoothProfile.STATE_CONNECTED)
                 {
-                    gatt.close();
-                } catch (Exception ignored)
+                    setState(STATE.CONNECTING);
+                    if (status != BluetoothGatt.GATT_SUCCESS || !gatt.discoverServices()) connectionFailed();
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED)
                 {
-                }
-                return;
-            }
-            if (newState == BluetoothProfile.STATE_CONNECTED)
-            {
-                setState(STATE.CONNECTING);
-                gatt.discoverServices();
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED)
-            {
-                bleWatchdogHandler.removeCallbacksAndMessages(null);
-                try
-                {
-                    gatt.close();
-                } catch (Exception ignored)
-                {
-                }
-                if (BleCommService.this.gatt == gatt)
-                {
-                    BleCommService.this.gatt = null;
-                }
-                STATE prevState = getState();
-                if (prevState == STATE.CONNECTING)
-                {
-                    connectionFailed();
-                } else if (prevState == STATE.CONNECTED)
-                {
-                    connectionLost();
+                    bleWatchdogHandler.removeCallbacksAndMessages(null);
+                    try
+                    {
+                        gatt.close();
+                    } catch (Exception ignored)
+                    {
+                    }
+                    if (BleCommService.this.gatt == gatt)
+                    {
+                        BleCommService.this.gatt = null;
+                    }
+                    STATE prevState = getState();
+                    if (prevState == STATE.CONNECTING)
+                    {
+                        connectionFailed();
+                    } else if (prevState == STATE.CONNECTED)
+                    {
+                        connectionLost();
+                    }
                 }
             }
         }
@@ -365,78 +357,86 @@ public class BleCommService
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status)
         {
-            log.fine(String.format(Locale.US, "onServicesDiscovered: %d", status));
-            if (stopping) return;
-            if (status == BluetoothGatt.GATT_SUCCESS)
-            {
-                rxCharacteristic = txCharacteristic = null;
-                List<BluetoothGattService> services = gatt.getServices();
-                for (BluetoothGattService service : services)
-                {
-                    if (!serialUUIDs.containsKey(service.getUuid())) continue;
-                    UUID[] serCharUUIDs = serialUUIDs.get(service.getUuid());
-                    if (serCharUUIDs == null) continue;
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
 
-                    boolean descriptorWriteStarted = false;
-                    for (BluetoothGattCharacteristic characteristic : service.getCharacteristics())
+                log.fine(String.format(Locale.US, "onServicesDiscovered: %d", status));
+                if (status == BluetoothGatt.GATT_SUCCESS)
+                {
+                    rxCharacteristic = txCharacteristic = null;
+                    List<BluetoothGattService> services = gatt.getServices();
+                    for (BluetoothGattService service : services)
                     {
-                        if (characteristic.getUuid().equals(serCharUUIDs[0]))
+                        if (!serialUUIDs.containsKey(service.getUuid())) continue;
+                        UUID[] serCharUUIDs = serialUUIDs.get(service.getUuid());
+                        if (serCharUUIDs == null) continue;
+
+                        boolean descriptorWriteStarted = false;
+                        for (BluetoothGattCharacteristic characteristic : service.getCharacteristics())
                         {
-                            rxCharacteristic = characteristic;
-                            gatt.setCharacteristicNotification(characteristic, true);
-                            BluetoothGattDescriptor desc = characteristic.getDescriptor(LE_CCCD);
-                            if (desc != null)
+                            if (characteristic.getUuid().equals(serCharUUIDs[0]))
                             {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                                rxCharacteristic = characteristic;
+                                gatt.setCharacteristicNotification(characteristic, true);
+                                BluetoothGattDescriptor desc = characteristic.getDescriptor(LE_CCCD);
+                                if (desc != null)
                                 {
-                                    descriptorWriteStarted = (gatt.writeDescriptor(
-                                            desc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == 0);
-                                } else
-                                {
-                                    desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                                    descriptorWriteStarted = gatt.writeDescriptor(desc);
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                                    {
+                                        descriptorWriteStarted = (gatt.writeDescriptor(
+                                                desc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == 0);
+                                    } else
+                                    {
+                                        desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                        descriptorWriteStarted = gatt.writeDescriptor(desc);
+                                    }
                                 }
                             }
+                            if (characteristic.getUuid().equals(serCharUUIDs[1]))
+                            {
+                                txCharacteristic = characteristic;
+                            }
                         }
-                        if (characteristic.getUuid().equals(serCharUUIDs[1]))
-                        {
-                            txCharacteristic = characteristic;
-                        }
-                    }
 
-                    if (rxCharacteristic != null && txCharacteristic != null)
-                    {
-                        String name = mDevice != null ? mDevice.getName() : null;
-                        if (name == null || name.isEmpty())
+                        if (rxCharacteristic != null && txCharacteristic != null)
                         {
-                            name = mDevice != null ? mDevice.getAddress() : "BLE OBD";
+                            String name = mDevice != null ? mDevice.getName() : null;
+                            if (name == null || name.isEmpty())
+                            {
+                                name = mDevice != null ? mDevice.getAddress() : "BLE OBD";
+                            }
+                            synchronized (txQueue)
+                            {
+                                pendingDeviceName = name;
+                            }
+                            if (descriptorWriteStarted)
+                            {
+                                // Wait for onDescriptorWrite (or fallback timer) so ATZ is not dropped
+                                bleWatchdogHandler.postDelayed(cccdTimeoutRunnable, CCCD_TIMEOUT_MS);
+                            } else
+                            {
+                                completeBleHandshakeIfPending();
+                            }
+                            return;
                         }
-                        synchronized (txQueue)
-                        {
-                            pendingDeviceName = name;
-                        }
-                        if (descriptorWriteStarted)
-                        {
-                            // Wait for onDescriptorWrite (or fallback timer) so ATZ is not dropped
-                            bleWatchdogHandler.postDelayed(cccdTimeoutRunnable, CCCD_TIMEOUT_MS);
-                        } else
-                        {
-                            completeBleHandshakeIfPending();
-                        }
-                        return;
                     }
+                    connectionFailed();
+                } else
+                {
+                    connectionFailed();
                 }
-                connectionFailed();
-            } else
-            {
-                connectionFailed();
             }
         }
 
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status)
         {
-            completeBleHandshakeIfPending();
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
+
+                if (status == BluetoothGatt.GATT_SUCCESS) completeBleHandshakeIfPending();
+                else connectionFailed();
+            }
         }
 
         @Override
@@ -444,23 +444,32 @@ public class BleCommService
                                           BluetoothGattCharacteristic characteristic,
                                           int status)
         {
-            bleWatchdogHandler.removeCallbacks(writeTimeoutRunnable);
-            synchronized (txQueue)
-            {
-                writeInFlight = false;
-                drainWriteQueueLocked();
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
+
+                if (status != BluetoothGatt.GATT_SUCCESS) { connectionLost(); return; }
+                bleWatchdogHandler.removeCallbacks(writeTimeoutRunnable);
+                synchronized (txQueue)
+                {
+                    writeInFlight = false;
+                    drainWriteQueueLocked();
+                }
             }
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic)
         {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
-            {
-                byte[] newValue = characteristic.getValue();
-                if (newValue != null)
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
+
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
                 {
-                    handleTelegram(new String(newValue, StandardCharsets.UTF_8).toCharArray());
+                    byte[] newValue = characteristic.getValue();
+                    if (newValue != null)
+                    {
+                        handleTelegram(new String(newValue, StandardCharsets.UTF_8).toCharArray());
+                    }
                 }
             }
         }
@@ -470,7 +479,11 @@ public class BleCommService
                                             @NonNull BluetoothGattCharacteristic characteristic,
                                             @NonNull byte[] value)
         {
-            handleTelegram(new String(value, StandardCharsets.UTF_8).toCharArray());
+            synchronized (BleCommService.this) {
+                if (stopping || gatt != BleCommService.this.gatt) return;
+
+                handleTelegram(new String(value, StandardCharsets.UTF_8).toCharArray());
+            }
         }
     };
 }

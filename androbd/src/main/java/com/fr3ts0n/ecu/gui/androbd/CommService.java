@@ -121,7 +121,7 @@ public abstract class CommService
 	/**
 	 * Indicate that the connection attempt failed and notify the UI Activity.
 	 */
-	void connectionFailed()
+	synchronized void connectionFailed()
 	{
 		if (stopping) return;
 		Handler handler = mHandler;
@@ -136,6 +136,7 @@ public abstract class CommService
 					selfId,
 					STATE.OFFLINE).sendToTarget();
 			Message msg = handler.obtainMessage(MainActivity.MESSAGE_TOAST);
+			msg.arg2 = selfId;
 			Bundle bundle = new Bundle();
 			bundle.putString(MainActivity.TOAST, ctx.getString(R.string.unabletoconnect));
 			msg.setData(bundle);
@@ -146,7 +147,7 @@ public abstract class CommService
 	/**
 	 * Indicate that an established connection was unexpectedly lost.
 	 */
-	void connectionLost()
+	synchronized void connectionLost()
 	{
 		if (stopping) return;
 		Handler handler = mHandler;
@@ -161,6 +162,7 @@ public abstract class CommService
 					selfId,
 					STATE.OFFLINE).sendToTarget();
 			Message msg = handler.obtainMessage(MainActivity.MESSAGE_TOAST);
+			msg.arg2 = selfId;
 			Bundle bundle = new Bundle();
 			bundle.putString(MainActivity.TOAST, ctx.getString(R.string.connectionlost));
 			msg.setData(bundle);
@@ -171,13 +173,15 @@ public abstract class CommService
 	/**
 	 * Indicate that the connection was established and notify the UI Activity.
 	 */
-	void connectionEstablished(String deviceName)
+	synchronized void connectionEstablished(String deviceName)
 	{
-		if (stopping || mHandler == null) return;
+		if (stopping) return;
+        if (mHandler == null) { setState(STATE.CONNECTED); return; }
 		String safeName = (deviceName != null && !deviceName.trim().isEmpty())
 				? deviceName.trim()
 				: "OBD-II";
 		Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_DEVICE_NAME);
+		msg.arg2 = System.identityHashCode(this);
 		Bundle bundle = new Bundle();
 		bundle.putString(MainActivity.DEVICE_NAME, safeName);
 		msg.setData(bundle);

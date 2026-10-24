@@ -55,7 +55,8 @@ public class StreamHandler implements TelegramWriter, Runnable
 		}
 	});
 	
-	private TelegramListener messageHandler;
+	private volatile TelegramListener messageHandler;
+	private boolean closed;
 	// current receive message
 	private String message = "";
 	
@@ -107,9 +108,9 @@ public class StreamHandler implements TelegramWriter, Runnable
 	 * @see com.fr3ts0n.prot.TelegramWriter#writeTelegram(char[], int, java.lang.Object)
 	 */
 	@Override
-	public int writeTelegram(final char[] buffer, int type, Object id)
+	public synchronized int writeTelegram(final char[] buffer, int type, Object id)
 	{
-		if (buffer == null)
+		if (closed || buffer == null)
 		{
 			return 0;
 		}
@@ -131,10 +132,11 @@ public class StreamHandler implements TelegramWriter, Runnable
 					
 					synchronized (writeLock)
 					{
-						if (out != null)
-						{
-							out.write(msg.toCharArray());
-							out.flush();
+                        BufferedWriter writer = out;
+                        if (writer != null)
+                        {
+                            writer.write(msg.toCharArray());
+                            writer.flush();
 						}
 					}
 				}
@@ -148,6 +150,16 @@ public class StreamHandler implements TelegramWriter, Runnable
 		return (result);
 	}
 	
+    /** End a transport session. The owner must close its socket to unblock pending I/O first. */
+    public synchronized void shutdown()
+    {
+        closed = true;
+        txExecutor.shutdownNow();
+        messageHandler = null;
+        in = null;
+        out = null;
+    }
+
 	/**
 	 * process incoming character
 	 *
@@ -175,8 +187,9 @@ public class StreamHandler implements TelegramWriter, Runnable
 			case 13:
 				try
 				{
-					if (messageHandler != null && !message.isEmpty())
-					{ messageHandler.handleTelegram(message.toCharArray()); }
+                    TelegramListener listener = messageHandler;
+                    if (listener != null && !message.isEmpty())
+                    { listener.handleTelegram(message.toCharArray()); }
 				}
 				catch (Exception ex)
 				{

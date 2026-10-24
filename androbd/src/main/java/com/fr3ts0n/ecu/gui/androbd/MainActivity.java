@@ -320,6 +320,12 @@ public class MainActivity extends PluginManager
                 PropertyChangeEvent evt;
                 log.log(Level.FINEST, String.format(Locale.US, "Handler notification: %s", msg));
 
+                if ((msg.what == MESSAGE_DEVICE_NAME || msg.what == MESSAGE_TOAST)
+                        && msg.arg2 != 0
+                        && (mCommService == null || System.identityHashCode(mCommService) != msg.arg2))
+                {
+                    return; // Late transport notification must not overwrite the new connection.
+                }
                 switch (msg.what)
                 {
                     case MESSAGE_STATE_CHANGE:

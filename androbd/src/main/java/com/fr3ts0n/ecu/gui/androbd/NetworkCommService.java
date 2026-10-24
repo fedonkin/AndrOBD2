@@ -27,140 +27,109 @@ import com.fr3ts0n.prot.StreamHandler;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 
 /**
  * Network communication service for Wi-Fi OBD-II adapters.
  */
-public class NetworkCommService
-	extends CommService
-	implements Runnable
+public class NetworkCommService extends CommService
 {
-	private static final int CONNECT_TIMEOUT_MS = 5000;
-	private volatile Socket mSocket;
-	private final StreamHandler ser = new StreamHandler();
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    private Session session;
 
-	public NetworkCommService()
-	{
-		super();
-	}
+    // Package seam for deterministic cancellation/late-completion regression tests.
+    Socket createSocket() { return new Socket(); }
 
-	public NetworkCommService(Context context, Handler handler)
-	{
-		super(context, handler);
-		ser.setMessageHandler(elm);
-	}
+    public NetworkCommService() { super(); }
+    public NetworkCommService(Context context, Handler handler) { super(context, handler); }
 
-	@Override
-	public void start()
-	{
-		log.fine("start");
-		elm.addTelegramWriter(ser);
-		Thread serThread = new Thread(this, "WifiObdReader");
-		serThread.start();
-	}
+    @Override
+    public synchronized void start()
+    {
+        if (session != null && !stopping && !session.readerStarted
+                && getState() == STATE.CONNECTED) {
+            session.readerStarted = true;
+            final Session owner = session;
+            new Thread(() -> {
+                owner.stream.run();
+                synchronized (NetworkCommService.this) {
+                    if (session == owner && !stopping) connectionLost();
+                }
+            }, "WifiObdReader").start();
+        }
+    }
 
-	@Override
-	public synchronized void stop()
-	{
-		log.fine("stop");
-		stopping = true;
-		elm.removeTelegramWriter(ser);
-		Socket sock = mSocket;
-		mSocket = null;
-		if (sock != null)
-		{
-			try
-			{
-				sock.close();
-			} catch (Exception e)
-			{
-				log.fine(String.valueOf(e.getMessage()));
-			}
-		}
-		setState(STATE.OFFLINE);
-	}
+    @Override
+    public synchronized void stop()
+    {
+        stopping = true;
+        Session old = session;
+        session = null; // Invalidate before closing: stale connect/read callbacks cannot reconnect.
+        if (old != null) {
+            elm.removeTelegramWriter(old.stream);
+            old.close();
+        }
+        setState(STATE.OFFLINE);
+    }
 
-	@Override
-	public void write(byte[] out)
-	{
-		if (!stopping && out != null)
-		{
-			ser.writeTelegram(new String(out, StandardCharsets.UTF_8).toCharArray());
-		}
-	}
+    @Override
+    public synchronized void write(byte[] out)
+    {
+        if (!stopping && session != null && getState() == STATE.CONNECTED && out != null)
+            session.stream.writeTelegram(new String(out, StandardCharsets.UTF_8).toCharArray());
+    }
 
-	@Override
-	public void run()
-	{
-		try
-		{
-			ser.run();
-		} catch (Exception e)
-		{
-			log.fine(String.valueOf(e.getMessage()));
-		}
-		if (!stopping && getState() == STATE.CONNECTED)
-		{
-			connectionLost();
-		}
-	}
+    private final class Session extends Thread
+    {
+        final String device;
+        final int port;
+        final Socket socket = createSocket();
+        final StreamHandler stream = new StreamHandler();
+        boolean readerStarted;
 
-	class ConnectThread extends Thread
-	{
-		final CommService svc;
-		final String device;
-		final int portNum;
+        Session(String device, int port) {
+            super("WifiObdConnect");
+            this.device = device;
+            this.port = port;
+            stream.setMessageHandler(elm);
+        }
 
-		ConnectThread(CommService svc, String device, int portNum)
-		{
-			super("WifiObdConnect");
-			this.svc = svc;
-			this.device = device;
-			this.portNum = portNum;
-		}
+        void close() {
+            try { socket.close(); } catch (Exception e) { log.fine(String.valueOf(e.getMessage())); }
+            stream.shutdown();
+        }
 
-		@Override
-		public void run()
-		{
-			log.info(String.format(Locale.US, "Connecting to %s port %d", device, portNum));
-			setState(STATE.CONNECTING);
-			Socket sock = new Socket();
-			mSocket = sock;
-			try
-			{
-				InetSocketAddress addr = new InetSocketAddress(device, portNum);
-				sock.connect(addr, CONNECT_TIMEOUT_MS);
-				if (stopping)
-				{
-					sock.close();
-					return;
-				}
-				sock.setTcpNoDelay(true);
-				ser.setStreams(sock.getInputStream(), sock.getOutputStream());
-				// Register writer & reader thread BEFORE signaling CONNECTED so initial ATZ is sent
-				svc.start();
-				connectionEstablished(device + ":" + portNum);
-			} catch (Exception e)
-			{
-				log.severe(String.valueOf(e.getMessage()));
-				if (!stopping)
-				{
-					connectionFailed();
-				}
-			}
-		}
-	}
+        @Override public void run() {
+            try {
+                socket.connect(new InetSocketAddress(device, port), CONNECT_TIMEOUT_MS);
+                socket.setTcpNoDelay(true);
+                synchronized (NetworkCommService.this) {
+                    if (session != this || stopping) { close(); return; }
+                    stream.setStreams(socket.getInputStream(), socket.getOutputStream());
+                    elm.addTelegramWriter(stream); // Ready for ATZ before notifying UI.
+                    connectionEstablished(device + ":" + port);
+                    // Publish CONNECTED before starting the reader, including immediate EOF.
+                    NetworkCommService.this.start();
+                }
+            } catch (Exception e) {
+                synchronized (NetworkCommService.this) {
+                    close();
+                    if (session == this && !stopping) {
+                        log.warning(String.valueOf(e.getMessage()));
+                        connectionFailed();
+                    }
+                }
+            }
+        }
+    }
 
-	public void connect(Object device, int portNum)
-	{
-		stopping = false;
-		new ConnectThread(this, String.valueOf(device), portNum).start();
-	}
+    public synchronized void connect(Object device, int portNum)
+    {
+        stop();
+        stopping = false;
+        session = new Session(String.valueOf(device).trim(), portNum);
+        setState(STATE.CONNECTING);
+        session.start();
+    }
 
-	@Override
-	public void connect(Object device, boolean secure)
-	{
-		connect(device, secure ? 23 : 22);
-	}
+    @Override public void connect(Object device, boolean secure) { connect(device, secure ? 23 : 22); }
 }
