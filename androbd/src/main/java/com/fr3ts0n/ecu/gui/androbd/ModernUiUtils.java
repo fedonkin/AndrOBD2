@@ -18,61 +18,118 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
+import android.app.Activity;
+import android.content.res.Configuration;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.ListView;
 
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+
 /**
- * Utility class for resource optimization and modern UI practices
- * Compatible with Android 4.1+
+ * Utility methods for responsive edge-to-edge system bar / cutout / IME insets,
+ * strict ActionBar navigation styling, and view optimization.
  */
-public class ModernUiUtils {
+public class ModernUiUtils
+{
+    /**
+     * Configure consistent edge-to-edge safe-area insets across Android 6.0 through Android 16+
+     * (targetSdk 37) without setting fitsSystemWindows in the global theme.
+     */
+    public static void applyEdgeToEdgeInsets(Activity activity)
+    {
+        if (activity == null) return;
+        Window window = activity.getWindow();
+        if (window == null) return;
+
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+
+        boolean isDark = (activity.getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        View decor = window.getDecorView();
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decor);
+        if (controller != null)
+        {
+            controller.setAppearanceLightStatusBars(!isDark);
+            controller.setAppearanceLightNavigationBars(!isDark);
+        }
+
+        View target = activity.findViewById(android.R.id.content);
+        while (target != null
+                && target.getParent() instanceof View
+                && target.getParent() != decor)
+        {
+            target = (View) target.getParent();
+        }
+        if (target == null) return;
+
+        target.setBackgroundColor(ContextCompat.getColor(activity, R.color.bg_surface));
+
+        ViewCompat.setOnApplyWindowInsetsListener(target, (v, windowInsets) -> {
+            Insets safe = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout()
+                            | WindowInsetsCompat.Type.ime());
+            v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        ViewCompat.requestApplyInsets(target);
+    }
 
     /**
-     * Optimize ListView performance with modern techniques
-     * @param listView ListView to optimize
+     * Enable crisp Up navigation arrow on sub-screen ActionBars.
      */
-    public static void optimizeListView(ListView listView) {
+    public static void enableActionBarUp(AppCompatActivity activity)
+    {
+        if (activity == null) return;
+        ActionBar ab = activity.getSupportActionBar();
+        if (ab != null)
+        {
+            ab.setDisplayHomeAsUpEnabled(true);
+            ab.setElevation(0f);
+        }
+    }
+
+    /**
+     * Optimize ListView scrolling behavior.
+     */
+    public static void optimizeListView(ListView listView)
+    {
         if (listView == null) return;
-        
-        // Enable smooth scrolling
         listView.setSmoothScrollbarEnabled(true);
-        
-        // Optimize scrolling performance  
-        listView.setScrollingCacheEnabled(true);
-        
-        // Enable fast scroll for large lists
         listView.setFastScrollEnabled(true);
-        
-        // Optimize drawing cache
-        listView.setDrawingCacheEnabled(true);
-        
-        // Set optimal scrollbar properties
         listView.setScrollbarFadingEnabled(true);
     }
 
     /**
-     * Recursively cleanup view hierarchy to prevent memory leaks
-     * @param view Root view to cleanup
+     * Recursively cleanup view hierarchy on Activity teardown.
      */
-    public static void cleanupViewHierarchy(View view) {
+    public static void cleanupViewHierarchy(View view)
+    {
         if (view == null) return;
-        try {
-            if (view instanceof ViewGroup viewGroup) {
-                for (int i = 0; i < viewGroup.getChildCount(); i++) {
+        try
+        {
+            if (view instanceof ViewGroup)
+            {
+                ViewGroup viewGroup = (ViewGroup) view;
+                for (int i = 0; i < viewGroup.getChildCount(); i++)
+                {
                     cleanupViewHierarchy(viewGroup.getChildAt(i));
                 }
             }
-
-            // Clear any background drawables to prevent memory leaks
             view.setBackground(null);
-
-            // Clear any click listeners
             view.setOnClickListener(null);
             view.setOnTouchListener(null);
-        } catch (Exception e) {
-            // Ignore any errors
+        } catch (Exception ignored)
+        {
         }
     }
-
 }

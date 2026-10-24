@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KIA Venga (2009–2019 YN) profile, presets & ECU modules -->
+    <string name="vehicle_profile_kia_auto">KIA Venga (2009–2019, Auto)</string>
+    <string name="vehicle_profile_kia_petrol">KIA Venga 1.4 / 1.6 CVVT Petrol (G4FA / G4FC)</string>
+    <string name="vehicle_profile_kia_diesel">KIA Venga 1.4 / 1.6 CRDi Diesel (D4FC / D4FB)</string>
+    <string name="vehicle_profile_short_kia">KIA Venga</string>
+    <string name="vehicle_profile_short_kia_petrol">KIA Venga CVVT</string>
+    <string name="vehicle_profile_short_kia_diesel">KIA Venga CRDi</string>
+    <string name="preset_kia_engine">Engine / CVVT / DPF</string>
+    <string name="preset_kia_chassis">Gearbox / Chassis</string>
+    <string name="preset_kia_all">KIA 21h/22h</string>
+    <string name="kia_mod_engine_obd">Engine (OBD)</string>
+    <string name="kia_mod_ecm">Engine (ECM)</string>
+    <string name="kia_mod_tcm">Gearbox (TCM)</string>
+    <string name="kia_mod_abs">ABS / ESC</string>
+    <string name="kia_mod_mdps">Steering (MDPS)</string>
+    <string name="kia_mod_srs">Airbag (SRS)</string>
+    <string name="kia_mod_bcm">Body / SMK</string>
+    <string name="kia_mod_clu">Cluster (CLU)</string>
+    <string name="kia_mod_fatc">Climate (FATC)</string>
+    <string name="kia_mod_tpms">Tires (TPMS)</string>
+</resources>

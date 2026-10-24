@@ -18,41 +18,41 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.TypedValue;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.content.ContextCompat;
 import androidx.preference.PreferenceDialogFragmentCompat;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
- * "Select All" + search dialog for {@link SearchableMultiSelectListPreference}.
- *
- * AndroidX shows preference dialogs through a {@code PreferenceDialogFragmentCompat}, so this
- * carries the same custom {@code onPrepareDialogBuilder}/{@code onDialogClosed} logic the
- * original {@code android.preference}-based class had directly on the Preference itself.
- *
- * @author BaderSZ
+ * Searchable "Select All" multi-select preference dialog with preserved check states on filter.
  */
 public class SearchableMultiSelectListPreferenceDialogFragment
-        extends PreferenceDialogFragmentCompat {
-
+        extends PreferenceDialogFragmentCompat
+{
     private CharSequence[] entries;
     private CharSequence[] entryValues;
     private CharSequence[] items;
     private CharSequence[] values;
     private boolean[] checkedItems;
 
-    public static SearchableMultiSelectListPreferenceDialogFragment newInstance(String key) {
+    public static SearchableMultiSelectListPreferenceDialogFragment newInstance(String key)
+    {
         SearchableMultiSelectListPreferenceDialogFragment fragment =
                 new SearchableMultiSelectListPreferenceDialogFragment();
         Bundle bundle = new Bundle(1);
@@ -62,7 +62,8 @@ public class SearchableMultiSelectListPreferenceDialogFragment
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState)
+    {
         super.onCreate(savedInstanceState);
         SearchableMultiSelectListPreference preference =
                 (SearchableMultiSelectListPreference) getPreference();
@@ -70,21 +71,42 @@ public class SearchableMultiSelectListPreferenceDialogFragment
         entryValues = preference.getEntryValues();
     }
 
-    @SuppressWarnings("deprecation")
+    private int dp(Context ctx, int v)
+    {
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, v, ctx.getResources().getDisplayMetrics()));
+    }
+
+    private void syncVisibleCheckStates(ListView listView, ArrayAdapter<CharSequence> adapter)
+    {
+        List<CharSequence> masterList = Arrays.asList(items);
+        for (int pos = 0; pos < adapter.getCount(); pos++)
+        {
+            CharSequence item = adapter.getItem(pos);
+            int origIdx = masterList.indexOf(item);
+            if (origIdx >= 0 && origIdx < checkedItems.length)
+            {
+                listView.setItemChecked(pos, checkedItems[origIdx]);
+            }
+        }
+    }
+
     @Override
-    protected void onPrepareDialogBuilder(AlertDialog.Builder builder) {
-        if (entries == null || entryValues == null) {
+    protected void onPrepareDialogBuilder(AlertDialog.Builder builder)
+    {
+        Context ctx = requireContext();
+        if (entries == null || entryValues == null)
+        {
             return;
         }
 
         SearchableMultiSelectListPreference preference =
                 (SearchableMultiSelectListPreference) getPreference();
 
-        // Add "Select All" at the top
         items = new CharSequence[entries.length + 1];
         values = new CharSequence[entryValues.length + 1];
 
-        items[0] = "Select All";
+        items[0] = ctx.getString(R.string.select_all_items);
         values[0] = "SELECT_ALL";
 
         System.arraycopy(entries, 0, items, 1, entries.length);
@@ -93,74 +115,97 @@ public class SearchableMultiSelectListPreferenceDialogFragment
         final Set<String> selectedValues = new HashSet<>(preference.getValues());
         checkedItems = new boolean[items.length];
 
-        // Pre-check items
         checkedItems[0] = selectedValues.size() == entryValues.length;
-        for (int i = 1; i < items.length; i++) {
+        for (int i = 1; i < items.length; i++)
+        {
             checkedItems[i] = selectedValues.contains(values[i].toString());
         }
 
-        final EditText search = new EditText(getContext());
-        search.setHint("Search...");
+        final EditText search = new EditText(ctx);
+        search.setHint(R.string.search_params_hint);
+        search.setSingleLine(true);
+        search.setBackgroundResource(R.drawable.bg_search_box);
+        search.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+        search.setHintTextColor(ContextCompat.getColor(ctx, R.color.text_tertiary));
+        search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        search.setPadding(dp(ctx, 12), dp(ctx, 8), dp(ctx, 12), dp(ctx, 8));
 
-        final ListView listView = new ListView(getContext());
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        searchLp.setMargins(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 6));
+        search.setLayoutParams(searchLp);
+
+        final ListView listView = new ListView(ctx);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f);
+        listView.setLayoutParams(listLp);
 
         final ArrayAdapter<CharSequence> adapter = new ArrayAdapter<>(
-                getContext(),
+                ctx,
                 android.R.layout.simple_list_item_multiple_choice,
                 new ArrayList<>(Arrays.asList(items))
         );
         listView.setAdapter(adapter);
         listView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+        syncVisibleCheckStates(listView, adapter);
 
-        for (int i = 0; i < checkedItems.length; i++) {
-            listView.setItemChecked(i, checkedItems[i]);
-        }
+        search.addTextChangedListener(new TextWatcher()
+        {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
 
-        search.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
 
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-            }
-
-            public void afterTextChanged(Editable s) {
-                String filter = s.toString().toLowerCase();
-
+            @Override
+            public void afterTextChanged(Editable s)
+            {
+                String filter = s.toString().toLowerCase(Locale.getDefault()).trim();
                 List<CharSequence> filteredItems = new ArrayList<>();
-                // always keep "Select All" at top
                 filteredItems.add(items[0]);
 
-                // i=1 to skip "Select All"
-                for (int i = 1; i < items.length; i++) {
-                    if (items[i].toString().toLowerCase().contains(filter)) {
+                for (int i = 1; i < items.length; i++)
+                {
+                    if (filter.isEmpty()
+                            || items[i].toString().toLowerCase(Locale.getDefault()).contains(filter))
+                    {
                         filteredItems.add(items[i]);
                     }
                 }
 
+                listView.clearChoices();
                 adapter.clear();
                 adapter.addAll(filteredItems);
                 adapter.notifyDataSetChanged();
+                syncVisibleCheckStates(listView, adapter);
             }
         });
 
         listView.setOnItemClickListener((parent, view, position, id) -> {
             CharSequence item = adapter.getItem(position);
-
             int originalIndex = Arrays.asList(items).indexOf(item);
+            if (originalIndex < 0) return;
+
             boolean isChecked = listView.isItemChecked(position);
             checkedItems[originalIndex] = isChecked;
 
-            // Select All clicked.
-            if (originalIndex == 0) {
-                for (int i = 1; i < checkedItems.length; i++) {
+            if (originalIndex == 0)
+            {
+                for (int i = 1; i < checkedItems.length; i++)
+                {
                     checkedItems[i] = isChecked;
-                    int filteredPos = adapter.getPosition(items[i]);
-                    if (filteredPos >= 0) listView.setItemChecked(filteredPos, isChecked);
                 }
-            } else {
+                syncVisibleCheckStates(listView, adapter);
+            } else
+            {
                 boolean allChecked = true;
-                for (int i = 1; i < checkedItems.length; i++) {
-                    if (!checkedItems[i]) {
+                for (int i = 1; i < checkedItems.length; i++)
+                {
+                    if (!checkedItems[i])
+                    {
                         allChecked = false;
                         break;
                     }
@@ -171,30 +216,31 @@ public class SearchableMultiSelectListPreferenceDialogFragment
             }
         });
 
-        android.widget.LinearLayout container = new android.widget.LinearLayout(getContext());
-        container.setOrientation(android.widget.LinearLayout.VERTICAL);
+        LinearLayout container = new LinearLayout(ctx);
+        container.setOrientation(LinearLayout.VERTICAL);
         container.addView(search);
         container.addView(listView);
 
         builder.setView(container);
-        // The base PreferenceDialogFragmentCompat already supplies OK/Cancel buttons wired to
-        // onDialogClosed(); this dialog only needs to override the message/view area, not the
-        // buttons themselves - matching the effect of the original class's own
-        // setPositiveButton/setNegativeButton calls.
     }
 
     @Override
-    public void onDialogClosed(boolean positiveResult) {
-        if (positiveResult && items != null && values != null && checkedItems != null) {
+    public void onDialogClosed(boolean positiveResult)
+    {
+        if (positiveResult && items != null && values != null && checkedItems != null)
+        {
             SearchableMultiSelectListPreference preference =
                     (SearchableMultiSelectListPreference) getPreference();
             Set<String> newValues = new HashSet<>();
-            for (int i = 1; i < checkedItems.length; i++) {
-                if (checkedItems[i]) {
+            for (int i = 1; i < checkedItems.length; i++)
+            {
+                if (checkedItems[i])
+                {
                     newValues.add(values[i].toString());
                 }
             }
-            if (preference.callChangeListener(newValues)) {
+            if (preference.callChangeListener(newValues))
+            {
                 preference.setValues(newValues);
             }
         }

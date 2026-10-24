@@ -31,6 +31,7 @@ import android.os.Message;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -45,20 +46,19 @@ import com.hoho.android.usbserial.driver.UsbSerialProber;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
 /**
- * Shows a {@link ListView} of available USB devices.
- *
- * @author mike wakerly (opensource@hoho.com)
+ * Shows a list of available USB serial OBD-II adapters.
  */
 public final class UsbDeviceListActivity extends AppCompatActivity
 {
 	private static final String TAG = UsbDeviceListActivity.class.getSimpleName();
 	private static final Logger log = Logger.getLogger(TAG);
-	
+
 	/** selected USB port */
 	public static UsbSerialPort selectedPort = null;
 
@@ -72,18 +72,15 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		@Override
 		public void handleMessage(Message msg)
 		{
-			switch (msg.what)
+			if (msg.what == MESSAGE_REFRESH)
 			{
-				case MESSAGE_REFRESH:
-					refreshDeviceList();
-					mHandler.sendEmptyMessageDelayed(MESSAGE_REFRESH, REFRESH_TIMEOUT_MILLIS);
-					break;
-				default:
-					super.handleMessage(msg);
-					break;
+				refreshDeviceList();
+				mHandler.sendEmptyMessageDelayed(MESSAGE_REFRESH, REFRESH_TIMEOUT_MILLIS);
+			} else
+			{
+				super.handleMessage(msg);
 			}
 		}
-
 	};
 
 	private final List<UsbSerialPort> mEntries = new ArrayList<>();
@@ -94,8 +91,11 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 	@Override
 	public void onCreate(Bundle savedInstanceState)
 	{
+		SettingsActivity.applyLocale(this);
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.usb_list);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+		ModernUiUtils.enableActionBarUp(this);
 
 		mUsbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 		RecyclerView mListView = findViewById(R.id.deviceList);
@@ -106,53 +106,87 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		mEmptyStateView = findViewById(R.id.empty_state);
 		mEmptyStateView.setText(R.string.no_usb_devices_found);
 		mScanProgress = findViewById(R.id.scan_progress);
+
+		View btnRescan = findViewById(R.id.btn_rescan_usb);
+		if (btnRescan != null)
+		{
+			btnRescan.setOnClickListener(v -> refreshDeviceList());
+		}
 	}
 
-	private void onPortSelected(UsbSerialPort port) {
-		selectedPort = port;
+	@Override
+	public boolean onSupportNavigateUp()
+	{
+		finish();
+		return true;
+	}
 
-		// Create the result Intent and include the MAC address
+	@Override
+	protected void onDestroy()
+	{
+		mExecutor.shutdownNow();
+		super.onDestroy();
+	}
+
+	private void onPortSelected(UsbSerialPort port)
+	{
+		selectedPort = port;
 		Intent intent = new Intent();
-		// Set result and finish this Activity
 		setResult(RESULT_OK, intent);
 		log.fine("Sending Result...");
 		finish();
 	}
 
-	private static class DeviceViewHolder extends RecyclerView.ViewHolder {
-		final TextView text;
-		DeviceViewHolder(@NonNull View itemView) {
+	private static class DeviceViewHolder extends RecyclerView.ViewHolder
+	{
+		final ImageView icon;
+		final TextView title;
+		final TextView subtitle;
+		final TextView badge;
+
+		DeviceViewHolder(@NonNull View itemView)
+		{
 			super(itemView);
-			text = (TextView) itemView;
+			icon = itemView.findViewById(R.id.device_icon);
+			title = itemView.findViewById(R.id.device_title);
+			subtitle = itemView.findViewById(R.id.device_subtitle);
+			badge = itemView.findViewById(R.id.device_badge);
 		}
 	}
 
-	private class UsbAdapter extends RecyclerView.Adapter<DeviceViewHolder> {
+	private class UsbAdapter extends RecyclerView.Adapter<DeviceViewHolder>
+	{
 		@NonNull
 		@Override
-		public DeviceViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+		public DeviceViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType)
+		{
 			View v = LayoutInflater.from(parent.getContext())
-				.inflate(R.layout.device_name, parent, false);
+					.inflate(R.layout.device_name, parent, false);
 			return new DeviceViewHolder(v);
 		}
 
 		@Override
-		public void onBindViewHolder(@NonNull DeviceViewHolder holder, int position) {
+		public void onBindViewHolder(@NonNull DeviceViewHolder holder, int position)
+		{
 			final UsbSerialPort port = mEntries.get(position);
 			final UsbSerialDriver driver = port.getDriver();
 			final UsbDevice device = driver.getDevice();
 
-			final String title = String.format("USB: 0x%04x/0x%04x",
-			                                   device.getVendorId(),
-			                                   device.getProductId());
+			final String title = String.format(Locale.US, "USB 0x%04X : 0x%04X",
+					device.getVendorId(),
+					device.getProductId());
 			final String subtitle = driver.getClass().getSimpleName();
 
-			holder.text.setText(String.format("%s\n%s", title, subtitle));
+			holder.icon.setImageResource(R.drawable.ic_usb);
+			holder.title.setText(title);
+			holder.subtitle.setText(subtitle);
+			holder.badge.setText(R.string.medium_usb);
 			holder.itemView.setOnClickListener(v -> onPortSelected(port));
 		}
 
 		@Override
-		public int getItemCount() {
+		public int getItemCount()
+		{
 			return mEntries.size();
 		}
 	}
@@ -171,9 +205,6 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		mHandler.removeMessages(MESSAGE_REFRESH);
 	}
 
-	// The device list is small and rebuilt wholesale every poll (no drivers persist across a
-	// refresh), so a full notifyDataSetChanged is genuinely simplest here — not worth a DiffUtil
-	// for a handful of items on a 5-second timer.
 	@SuppressLint({"StringFormatInvalid", "NotifyDataSetChanged"})
 	private void refreshDeviceList()
 	{
@@ -181,14 +212,14 @@ public final class UsbDeviceListActivity extends AppCompatActivity
 		mExecutor.submit(() -> {
 			log.fine("Refreshing device list ...");
 			final List<UsbSerialDriver> drivers =
-				UsbSerialProber.getDefaultProber().findAllDrivers(mUsbManager);
+					UsbSerialProber.getDefaultProber().findAllDrivers(mUsbManager);
 			final List<UsbSerialPort> result = new ArrayList<>();
 			for (final UsbSerialDriver driver : drivers)
 			{
 				final List<UsbSerialPort> ports = driver.getPorts();
-				log.fine(String.format("+ %s: %s selectedPort%s",
-				                       driver, ports.size(),
-				                       ports.size() == 1 ? "" : "s"));
+				log.fine(String.format(Locale.US, "+ %s: %d selectedPort%s",
+						driver, ports.size(),
+						ports.size() == 1 ? "" : "s"));
 				result.addAll(ports);
 			}
 			mHandler.post(() -> {

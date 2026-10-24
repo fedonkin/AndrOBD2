@@ -28,6 +28,8 @@ import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.ObdCodeItem;
 import com.fr3ts0n.ecu.ObdPid;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.prot.ProtoHeader;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
@@ -38,6 +40,9 @@ import java.beans.PropertyChangeEvent;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.Stack;
 import java.util.Vector;
 
@@ -63,6 +68,22 @@ public class ObdProt extends ProtoHeader
     public static final int OBD_SVC_CTRL_MODE = 0x08;
     public static final int OBD_SVC_VEH_INFO = 0x09;
     public static final int OBD_SVC_PERMACODES = 0x0A;
+    public static final int OBD_SVC_DIAG_SESSION = 0x10;
+    public static final int OBD_SVC_MOD_CODES_13 = 0x13;
+    public static final int OBD_SVC_MOD_CLEAR_14 = 0x14;
+    public static final int OBD_SVC_MOD_CODES_18 = 0x18;
+    public static final int OBD_SVC_MOD_CODES_19 = 0x19;
+    public static final int OBD_SVC_KWP_DATA = 0x21;
+    public static final int OBD_SVC_EXT_DATA = 0x22;
+
+    /** Universal synthetic virtual PID codes */
+    public static final int VPID_ADAPTER_VOLTAGE = VirtualPidCalculator.VPID_ADAPTER_VOLTAGE;
+    public static final int VPID_TOTAL_TRIM_B1   = VirtualPidCalculator.VPID_TOTAL_TRIM_B1;
+    public static final int VPID_TOTAL_TRIM_B2   = VirtualPidCalculator.VPID_TOTAL_TRIM_B2;
+    public static final int VPID_FUEL_RATE_LH    = VirtualPidCalculator.VPID_FUEL_RATE_LH;
+    public static final int VPID_FUEL_ECON_L100  = VirtualPidCalculator.VPID_FUEL_ECON_L100;
+
+    public final VirtualPidCalculator virtualPids = new VirtualPidCalculator();
 
     /** negative response ID */
     private static final int OBD_ID_NRC = 0x7F;
@@ -323,10 +344,16 @@ public class ObdProt extends ProtoHeader
                 fldMap = FRZFRM_PARAMETERS;
                 break;
 
+            case OBD_SVC_NONE:
             case OBD_SVC_READ_CODES:
             case OBD_SVC_PENDINGCODES:
             case OBD_SVC_PERMACODES:
             case OBD_SVC_CLEAR_CODES:
+            case OBD_SVC_DIAG_SESSION:
+            case OBD_SVC_MOD_CODES_13:
+            case OBD_SVC_MOD_CLEAR_14:
+            case OBD_SVC_MOD_CODES_18:
+            case OBD_SVC_MOD_CODES_19:
                 fldMap = SVC_PARAMETERS;
                 break;
 
@@ -497,18 +524,56 @@ public class ObdProt extends ProtoHeader
      */
     public static synchronized void setFixedPid(int[] pidCodes)
     {
-        for (ObdPid currPid : pidSupported)
+        fixedPids.clear();
+        if (pidCodes != null)
         {
-            if (Arrays.binarySearch(pidCodes, currPid.intValue()) >= 0)
+            Set<Integer> wanted = new HashSet<Integer>();
+            for (int c : pidCodes)
             {
-                fixedPids.add(currPid);
+                wanted.add(Integer.valueOf(c));
+                if (c == VPID_TOTAL_TRIM_B1)
+                {
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+                else if (c == VPID_TOTAL_TRIM_B2)
+                {
+                    wanted.add(Integer.valueOf(0x08));
+                    wanted.add(Integer.valueOf(0x09));
+                }
+                else if (c == VPID_FUEL_RATE_LH)
+                {
+                    wanted.add(Integer.valueOf(0x10));
+                    wanted.add(Integer.valueOf(0x03));
+                    wanted.add(Integer.valueOf(0x51));
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+                else if (c == VPID_FUEL_ECON_L100)
+                {
+                    wanted.add(Integer.valueOf(0x10));
+                    wanted.add(Integer.valueOf(0x03));
+                    wanted.add(Integer.valueOf(0x51));
+                    wanted.add(Integer.valueOf(0x0D));
+                    wanted.add(Integer.valueOf(0x06));
+                    wanted.add(Integer.valueOf(0x07));
+                }
+            }
+            for (ObdPid currPid : pidSupported)
+            {
+                if (wanted.contains(Integer.valueOf(currPid.intValue())))
+                {
+                    fixedPids.add(currPid);
+                }
             }
         }
+        VehicleProfileManager.setFixedPidSelection(pidCodes);
     }
 
     public static synchronized void resetFixedPid()
     {
         fixedPids.clear();
+        VehicleProfileManager.clearFixedPidSelection();
     }
 
     /**
@@ -540,6 +605,17 @@ public class ObdProt extends ProtoHeader
         return result;
     }
 
+    synchronized boolean hasSupportedPids()
+    {
+        return !pidSupported.isEmpty();
+    }
+
+    protected synchronized void prepareModuleScanReset()
+    {
+        tCodes.clear();
+        setNumCodes(0);
+    }
+
     /**
      * handle OBD response telegram
      * @param buffer - telegram buffer
@@ -551,6 +627,24 @@ public class ObdProt extends ProtoHeader
     {
         int result = 0;
         int msgPid;
+
+        if (VehicleProfileManager.isCustomProfileActive()
+                && buffer != null && buffer.length == 2)
+        {
+            String shortHex = new String(buffer);
+            if ("53".equalsIgnoreCase(shortHex) || "58".equalsIgnoreCase(shortHex))
+            {
+                if (tCodes.isEmpty())
+                {
+                    tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+                }
+                return result;
+            }
+            if ("50".equalsIgnoreCase(shortHex) || "54".equalsIgnoreCase(shortHex))
+            {
+                return result;
+            }
+        }
 
         if (checkTelegram(buffer))
         {
@@ -564,6 +658,35 @@ public class ObdProt extends ProtoHeader
                     int svc = (Integer) getParamValue(ID_NR_SVC, buffer);
                     // get NRC code
                     int nrcCode = (Integer) getParamValue(ID_NR_CODE, buffer);
+                    // Non-destructive handling for optional brand profile Mode 21/22 & module services
+                    if (VehicleProfileManager.isCustomProfileActive()
+                            && (svc == OBD_SVC_KWP_DATA
+                                || svc == OBD_SVC_EXT_DATA
+                                || svc == OBD_SVC_MOD_CODES_13
+                                || svc == OBD_SVC_MOD_CODES_18
+                                || svc == OBD_SVC_MOD_CODES_19
+                                || svc == OBD_SVC_DIAG_SESSION
+                                || svc == OBD_SVC_MOD_CLEAR_14))
+                    {
+                        if (nrcCode != NRC.RCRRP.code)
+                        {
+                            VehicleProfileManager.onOptionalCommandFailed(svc, nrcCode, lastTxMsg);
+                        }
+                        log.fine(String.format("Optional profile service 0x%02X NRC 0x%02X (%s)",
+                                svc, nrcCode, lastTxMsg));
+                        return result;
+                    }
+                    // Pre-2010 ECUs (EOBD / ISO 9141 / J1850 / early CAN) do not support Mode 0A
+                    // (Permanent DTCs) and some omit Mode 07: skip quietly without wiping Mode 03 codes
+                    if ((svc == OBD_SVC_PERMACODES || svc == OBD_SVC_PENDINGCODES)
+                            && (nrcCode == NRC.SNS.code
+                                || nrcCode == NRC.SFNS.code
+                                || nrcCode == NRC.ROOR.code))
+                    {
+                        log.fine(String.format("Optional DTC mode 0x%02X not supported (NRC 0x%02X)",
+                                svc, nrcCode));
+                        return result;
+                    }
                     // get NRC object
                     NRC nrc = NRC.get(nrcCode);
                     // create NRC error message
@@ -640,11 +763,15 @@ public class ObdProt extends ProtoHeader
                                 setNumCodes(Long.valueOf(msgPayload).intValue());
                                 // no break here ...
                             default:
+                                char[] payloadBytes = hexToBytes(String.valueOf(getPayLoad(buffer)));
                                 long updatePeriod =
                                     dataItems.updateDataItems(msgService,
                                                             msgPid,
-                                                            hexToBytes(String.valueOf(
-                                                                    getPayLoad(buffer))));
+                                                            payloadBytes);
+                                if (msgService == OBD_SVC_DATA)
+                                {
+                                    virtualPids.onMode01PidUpdated(msgPid, payloadBytes, PidPvs);
+                                }
                                 /* Update expected request timestamp for PID */
                                 for( ObdPid pid : pidSupported)
                                 {
@@ -712,27 +839,40 @@ public class ObdProt extends ProtoHeader
                         if (hasNumCodes)
                         {
                             nCodes = Integer.valueOf(new String(buffer, 2, 2), 16);
-                            setNumCodes(nCodes);
+                            int milBit = this.numCodes & 0x80;
+                            int prevCount = this.numCodes & 0x7F;
+                            if (msgService == OBD_SVC_READ_CODES && prevCount == 0)
+                            {
+                                setNumCodes(milBit | nCodes);
+                            } else if (nCodes > prevCount)
+                            {
+                                setNumCodes(milBit | nCodes);
+                            }
                             // DTC data starts at offset 4 (byte 2)
                             DTCOffs = 4;
                         }
 
                         // read in all trouble codes
-                        for (int i = DTCOffs; i < buffer.length; i += 4)
+                        for (int i = DTCOffs; i + 4 <= buffer.length; i += 4)
                         {
                             key = Integer.valueOf(new String(buffer, i, 4), 16);
                             currCode = key.intValue();
                             if (currCode != 0)
                             {
-                                if ((code = knownCodes.get(key)) == null)
-                                {
-                                    code = new ObdCodeItem(key.intValue(),
-                                                           Messages.getString(
-                                                           "customer.specific.trouble.code.see.manual"));
-                                }
+                                EcuCodeItem known = knownCodes.get(key);
+                                String desc = (known != null && known.get(EcuCodeItem.FID_DESCRIPT) != null)
+                                        ? String.valueOf(known.get(EcuCodeItem.FID_DESCRIPT))
+                                        : Messages.getString("customer.specific.trouble.code.see.manual");
+                                code = new ObdCodeItem(currCode, desc);
                                 log.fine(String.format("+DFC: %04x: %s", key, code.toString()));
                                 // Remember received message service to know code status
                                 code.put(EcuCodeItem.FID_STATUS, Integer.valueOf(msgService));
+                                VehicleModule mod = VehicleProfileManager.getActiveModule();
+                                if (mod != null && !mod.isEngineObd())
+                                {
+                                    code.put(VehicleProfileManager.CODE_FIELD_MODULE, mod.getShortTag());
+                                }
+                                tCodes.remove(Integer.valueOf(0));
                                 tCodes.put(key, code);
                                 // if number of codes hasn't been delivered yet ...
                                 if(!hasNumCodes)
@@ -742,7 +882,7 @@ public class ObdProt extends ProtoHeader
                                 }
                             }
                         }
-                        if (nCodes == 0)
+                        if (nCodes == 0 && tCodes.isEmpty())
                         {
                             tCodes.put(0, new ObdCodeItem(0, Messages.getString(
                                     "no.trouble.codes.set")));
@@ -751,6 +891,49 @@ public class ObdProt extends ProtoHeader
 
                     // clear code response
                     case OBD_SVC_CLEAR_CODES:
+                    case OBD_SVC_DIAG_SESSION:
+                    case OBD_SVC_MOD_CLEAR_14:
+                        break;
+
+                    // KWP2000-on-CAN Mode 0x21 extended response (61 XX <data...>)
+                    case OBD_SVC_KWP_DATA:
+                        if (VehicleProfileManager.isCustomProfileActive() && buffer.length >= 6)
+                        {
+                            int localId = Integer.parseInt(new String(buffer, 2, 2), 16);
+                            char[] payloadBytes = hexToBytes(new String(buffer, 4, buffer.length - 4));
+                            VehicleProfileManager.onExtendedResponse(
+                                    null, OBD_SVC_KWP_DATA, localId, payloadBytes, PidPvs);
+                        }
+                        break;
+
+                    // Extended Mode 0x22 PID response (62 XX XX <data...>)
+                    case OBD_SVC_EXT_DATA:
+                        if (VehicleProfileManager.isCustomProfileActive() && buffer.length >= 8)
+                        {
+                            int pid16 = Integer.parseInt(new String(buffer, 2, 4), 16);
+                            char[] payloadBytes = hexToBytes(new String(buffer, 6, buffer.length - 6));
+                            VehicleProfileManager.onExtendedResponse(
+                                    null, OBD_SVC_EXT_DATA, pid16, payloadBytes, PidPvs);
+                        }
+                        break;
+
+                    // Multi-module DTC responses (53..., 58..., 59...)
+                    case OBD_SVC_MOD_CODES_13:
+                    case OBD_SVC_MOD_CODES_18:
+                    case OBD_SVC_MOD_CODES_19:
+                        if (VehicleProfileManager.isCustomProfileActive())
+                        {
+                            int added = VehicleProfileManager.parseModuleDtcResponse(
+                                    msgService, buffer, knownCodes, tCodes);
+                            if (added > 0)
+                            {
+                                setNumCodes(this.numCodes + added);
+                            } else if (tCodes.isEmpty())
+                            {
+                                tCodes.put(0, new ObdCodeItem(0, Messages.getString(
+                                        "no.trouble.codes.set")));
+                            }
+                        }
                         break;
 
                     default:
@@ -773,6 +956,7 @@ public class ObdProt extends ProtoHeader
     {
         // remember last sent message
         lastTxMsg = new String(buffer);
+        VehicleProfileManager.notifyTxCommand(lastTxMsg);
         super.sendTelegram(buffer);
     }
 
@@ -822,6 +1006,7 @@ public class ObdProt extends ProtoHeader
         // reset fixed PIDs
         resetFixedPid();
         // Clear data items
+        virtualPids.reset(PidPvs);
         PidPvs.clear();
         tCodes.clear();
         VidPvs.clear();
@@ -831,7 +1016,7 @@ public class ObdProt extends ProtoHeader
      * clear data lists for selected service
      * @param obdService OBD service to clear lists for
      */
-    private void clearDataLists(int obdService)
+    protected void clearDataLists(int obdService)
     {
         // clean up data lists
         switch (obdService)
@@ -839,6 +1024,10 @@ public class ObdProt extends ProtoHeader
             case OBD_SVC_DATA:
             case OBD_SVC_FREEZEFRAME:
                 // Clear data items
+                if (obdService == OBD_SVC_DATA)
+                {
+                    virtualPids.reset(PidPvs);
+                }
                 pidSupported.clear();
                 PidPvs.clear();
                 break;
@@ -894,13 +1083,20 @@ public class ObdProt extends ProtoHeader
             case OBD_SVC_READ_CODES:
             case OBD_SVC_PENDINGCODES:
             case OBD_SVC_PERMACODES:
-                numCodes = 0;
-                // Queue requests for reading all trouble codes
-                cmdStack.add(String.format("%02X", OBD_SVC_READ_CODES));
-                cmdStack.add(String.format("%02X", OBD_SVC_PENDINGCODES));
-                cmdStack.add(String.format("%02X", OBD_SVC_PERMACODES));
-                // read PID number of codes ...
-                writeTelegram(emptyBuffer, OBD_SVC_DATA, 1);
+                if (clearLists)
+                {
+                    numCodes = 0;
+                    cmdStack.clear();
+                    // Push onto LIFO cmdStack so pop() executes 03 -> 07 -> 0A in forward order
+                    if (VehicleProfileManager.supportsPermanentDtcMode0A())
+                    {
+                        cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
+                    }
+                    cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
+                    cmdStack.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
+                    // read PID number of codes ...
+                    writeTelegram(emptyBuffer, OBD_SVC_DATA, 1);
+                }
                 break;
 
             case OBD_SVC_CLEAR_CODES:

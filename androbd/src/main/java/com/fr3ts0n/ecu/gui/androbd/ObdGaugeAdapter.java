@@ -19,26 +19,25 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.content.Context;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.github.anastr.speedviewlib.AwesomeSpeedometer;
 
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Adapter for OBD data gauge display
- *
- * @author erwin
+ * Adapter for OBD data gauge display in strict responsive card containers.
  */
 class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHolder>
 {
@@ -46,11 +45,8 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 	private final int resourceId;
 	private final List<EcuDataPv> items = new ArrayList<>();
 	private OnItemLongClickListener longClickListener;
+	private float columnWidthDp = 240f;
 
-	/** format for numeric labels */
-	private static final NumberFormat labelFormat = new DecimalFormat("0;-#");
-
-	/** Callback for a long-press on a gauge item. */
 	interface OnItemLongClickListener
 	{
 		boolean onItemLongClick(int position);
@@ -58,14 +54,34 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 
 	static class GaugeViewHolder extends RecyclerView.ViewHolder
 	{
-		AwesomeSpeedometer gauge;
-		TextView tvDescr;
+		final AwesomeSpeedometer gauge;
+		final TextView tvDescr;
+		private Integer boundSpeedometerColor;
 
 		GaugeViewHolder(View itemView)
 		{
 			super(itemView);
 			gauge = itemView.findViewById(R.id.chart);
 			tvDescr = itemView.findViewById(R.id.label);
+			// AwesomeSpeedometer 1.6.1 creates a RadialGradient in setSpeedometerColor.
+			// RecyclerView binds before measurement; sizePa is still zero at that point.
+			// One holder-owned listener uses the latest binding (no stale posted colors).
+			gauge.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+					applySpeedometerColorIfSized());
+		}
+
+		void bindSpeedometerColor(int color)
+		{
+			boundSpeedometerColor = color;
+			applySpeedometerColorIfSized();
+		}
+
+		private void applySpeedometerColorIfSized()
+		{
+			if (boundSpeedometerColor != null && gauge.getSizePa() > 0)
+			{
+				gauge.setSpeedometerColor(boundSpeedometerColor);
+			}
 		}
 	}
 
@@ -75,37 +91,43 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		this.resourceId = resource;
 	}
 
-	/** Sets the listener invoked on a long-press of a gauge item. */
+	void setColumnWidthDp(float widthDp)
+	{
+		this.columnWidthDp = Math.max(140f, widthDp);
+	}
+
 	void setOnItemLongClickListener(OnItemLongClickListener listener)
 	{
 		longClickListener = listener;
 	}
 
-	/** Returns the item at {@code position}, or {@code null} if out of range. */
 	EcuDataPv getItem(int position)
 	{
 		return (position >= 0 && position < items.size()) ? items.get(position) : null;
 	}
 
-	/** Returns the position of {@code pv} in the current item list, or -1 if not present. */
 	int getPosition(EcuDataPv pv)
 	{
 		return items.indexOf(pv);
 	}
 
-	/** Appends {@code pv} to the item list and notifies the RecyclerView. */
 	void add(EcuDataPv pv)
 	{
 		items.add(pv);
 		notifyItemInserted(items.size() - 1);
 	}
 
-	/** Removes all items and notifies the RecyclerView. */
 	void clear()
 	{
 		int size = items.size();
 		items.clear();
 		notifyItemRangeRemoved(0, size);
+	}
+
+	private float sp(float v)
+	{
+		return TypedValue.applyDimension(
+				TypedValue.COMPLEX_UNIT_SP, v, context.getResources().getDisplayMetrics());
 	}
 
 	@Override
@@ -129,34 +151,60 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		if (currPv == null) return;
 
 		holder.itemView.setOnLongClickListener(v ->
-			longClickListener != null
-				&& longClickListener.onItemLongClick(holder.getBindingAdapterPosition()));
+				longClickListener != null
+						&& longClickListener.onItemLongClick(holder.getBindingAdapterPosition()));
 
-		// Get display color ...
 		int pidColor = ColorAdapter.getItemColor(currPv);
-
-		// Taint background with PID color
-		holder.itemView.setBackgroundColor(pidColor & 0x10FFFFFF);
-		// set new values for display
+		boolean compact = columnWidthDp < 200f;
+		holder.tvDescr.setTextSize(TypedValue.COMPLEX_UNIT_SP, compact ? 11.5f : 13f);
 		holder.tvDescr.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
 
 		Number minValue = (Number) currPv.get(EcuDataPv.FID_MIN);
 		Number maxValue = (Number) currPv.get(EcuDataPv.FID_MAX);
-		Number value =    (Number) currPv.get(EcuDataPv.FID_VALUE);
-		String format = (String) currPv.get(EcuDataPv.FID_FORMAT);
+		Number value = (Number) currPv.get(EcuDataPv.FID_VALUE);
+		final String format = (String) currPv.get(EcuDataPv.FID_FORMAT);
 
 		if (minValue == null) minValue = 0f;
-		if (maxValue == null) maxValue = 255f;
+		if (maxValue == null || maxValue.floatValue() <= minValue.floatValue())
+		{
+			maxValue = minValue.floatValue() + 100f;
+		}
+		if (value == null) value = minValue;
 
-		// Tick triangles show in PID color
 		holder.gauge.setTrianglesColor(pidColor);
-		holder.gauge.setBackgroundCircleColor(pidColor & 0x20FFFFFF);
-		// Use PID specific units and value format
-		holder.gauge.setUnit(currPv.getUnits());
-		holder.gauge.setSpeedTextListener(aFloat -> String.format(format, aFloat));
+		holder.bindSpeedometerColor(pidColor);
+		holder.gauge.getIndicator().setColor(pidColor);
+		holder.gauge.setBackgroundCircleColor(
+				ContextCompat.getColor(context, R.color.bg_surface_elevated));
+		holder.gauge.setSpeedTextColor(
+				ContextCompat.getColor(context, R.color.text_primary));
+		holder.gauge.setTextColor(
+				ContextCompat.getColor(context, R.color.text_secondary));
+		holder.gauge.setUnitTextColor(
+				ContextCompat.getColor(context, R.color.text_secondary));
+
+		// Responsive typography so tick labels and center value never collide on 2-col narrow screens
+		holder.gauge.setSpeedTextSize(sp(compact ? 15f : 20f));
+		holder.gauge.setUnitTextSize(sp(compact ? 10f : 12f));
+		holder.gauge.setTextSize(sp(compact ? 9.5f : 11f));
+
+		String units = currPv.getUnits();
+		holder.gauge.setUnit(units != null ? units : "");
+		holder.gauge.setSpeedTextListener(aFloat -> {
+			if (format != null && !format.isEmpty())
+			{
+				try
+				{
+					return String.format(Locale.getDefault(), format, aFloat);
+				} catch (Exception ignored)
+				{
+				}
+			}
+			return String.format(Locale.getDefault(), "%.1f", aFloat);
+		});
 
 		holder.gauge.setMinSpeed(minValue.floatValue());
 		holder.gauge.setMaxSpeed(maxValue.floatValue());
-		holder.gauge.speedTo(value.floatValue());
+		holder.gauge.speedTo(value.floatValue(), 350);
 	}
 }

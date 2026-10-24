@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KIA Venga (2009–2019 YN) профиль, пресеты и блоки ЭБУ -->
+    <string name="vehicle_profile_kia_auto">KIA Venga (2009–2019, Авто)</string>
+    <string name="vehicle_profile_kia_petrol">KIA Venga 1.4 / 1.6 CVVT Бензин (G4FA / G4FC)</string>
+    <string name="vehicle_profile_kia_diesel">KIA Venga 1.4 / 1.6 CRDi Дизель (D4FC / D4FB)</string>
+    <string name="vehicle_profile_short_kia">KIA Venga</string>
+    <string name="vehicle_profile_short_kia_petrol">KIA Venga CVVT</string>
+    <string name="vehicle_profile_short_kia_diesel">KIA Venga CRDi</string>
+    <string name="preset_kia_engine">ДВС / CVVT / DPF</string>
+    <string name="preset_kia_chassis">АКПП / Шасси</string>
+    <string name="preset_kia_all">Все KIA</string>
+    <string name="kia_mod_engine_obd">Двигатель (OBD)</string>
+    <string name="kia_mod_ecm">Двигатель ECM</string>
+    <string name="kia_mod_tcm">АКПП (TCM)</string>
+    <string name="kia_mod_abs">ABS / ESP</string>
+    <string name="kia_mod_mdps">ЭУР (MDPS)</string>
+    <string name="kia_mod_srs">Подушки (SRS)</string>
+    <string name="kia_mod_bcm">Кузов / SMK</string>
+    <string name="kia_mod_clu">Приборка (CLU)</string>
+    <string name="kia_mod_fatc">Климат (FATC)</string>
+    <string name="kia_mod_tpms">Шины (TPMS)</string>
+</resources>

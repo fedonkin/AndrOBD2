@@ -375,4 +375,199 @@ period of time while the ECU recalibrates itself.
         <item>fr</item>
         <item>es</item>
     </string-array>
+
+    <!-- Modern connection & UI strings -->
+    <string name="connect_real_adapter">Connect to adapter</string>
+    <string name="start_demo_mode">Demo mode</string>
+    <string name="stop_demo_mode">Exit demo</string>
+    <string name="open_live_data">Open live data</string>
+    <string name="status_offline">Disconnected</string>
+    <string name="status_online">Connected</string>
+    <string name="status_demo">Demo mode</string>
+    <string name="status_file">Saved file</string>
+    <string name="connection_type_label">Connection method</string>
+    <string name="medium_bt">Bluetooth</string>
+    <string name="medium_ble">BLE 4.0</string>
+    <string name="medium_wifi">Wi-Fi</string>
+    <string name="medium_usb">USB</string>
+    <string name="medium_hint_bt">Classic Bluetooth ELM327 adapter (SPP)</string>
+    <string name="medium_hint_ble">Bluetooth Low Energy 4.0+ adapter</string>
+    <string name="medium_hint_wifi">Wi-Fi ELM327 adapter over TCP/IP</string>
+    <string name="medium_hint_usb">Wired USB-Serial OTG adapter</string>
+    <string name="home_subtitle">OBD-II vehicle diagnostics</string>
+    <string name="section_diagnostics">Diagnostics &amp; Data</string>
+    <string name="card_live_data_title">Live Data</string>
+    <string name="card_live_data_sub">Real-time sensors</string>
+    <string name="card_codes_title">Fault Codes</string>
+    <string name="card_codes_sub">Read &amp; clear DTC</string>
+    <string name="card_veh_title">Vehicle Info</string>
+    <string name="card_veh_sub">VIN &amp; ECU IDs</string>
+    <string name="card_load_title">Saved Logs</string>
+    <string name="card_load_sub">Open saved session</string>
+    <string name="connect_first_hint">Connect to an adapter or start Demo mode first</string>
+    <string name="tab_data">Data</string>
+    <string name="tab_codes">Faults</string>
+    <string name="tab_vehicle">Vehicle</string>
+    <string name="tab_freezeframe">Freeze</string>
+    <string name="search_params_hint">Search parameters…</string>
+    <string name="clear_search">Clear search</string>
+    <string name="params_count_fmt">%d items</string>
+    <string name="mil_ok">MIL OK</string>
+    <string name="mil_active_fmt">CHECK (%d)</string>
+    <string name="empty_waiting_data">Waiting for ECU data…</string>
+    <string name="empty_no_codes">No fault codes stored in ECU</string>
+    <string name="empty_no_search_match">No matching parameters</string>
+    <string name="bt_not_supported">Bluetooth is not supported on this device</string>
+    <string name="bt_permission_required">Bluetooth permission is required to connect to the adapter</string>
+    <string name="wifi_connect_title">Wi-Fi Adapter Connection</string>
+    <string name="wifi_connect_action">Connect</string>
+    <string name="rescan_devices">Scan</string>
+    <string name="device_paired">Paired</string>
+    <string name="device_nearby">Nearby</string>
+    <string name="device_obd_paired">OBD · Paired</string>
+    <string name="device_obd_nearby">OBD · Nearby</string>
+    <string name="select_adapter_subtitle">Tap your ELM327 / OBD-II adapter to connect</string>
+    <string name="dtc_status_confirmed">Confirmed</string>
+    <string name="dtc_status_pending">Pending</string>
+    <string name="dtc_status_permanent">Permanent</string>
+    <string name="no_numeric_items_yet">Wait until numeric parameters are received</string>
+    <string name="back_action">Back</string>
+    <string name="home_action">Home</string>
+    <string name="hud_short" translatable="false">HUD</string>
+    <string name="live_rec_start">Record Live (1s)</string>
+    <string name="live_rec_stop_fmt">Stop · %1$s (%2$d)</string>
+    <string name="live_rec_copy_fmt">CSV / Export (%d)</string>
+    <string name="live_rec_copy_home_fmt">Export Live log · CSV / Summary (%1$d rows · %2$s)</string>
+    <string name="live_rec_menu_copy">Export Live recording (CSV / Summary)</string>
+    <string name="live_rec_started_toast">Recording Live data every 1 second…</string>
+    <string name="live_rec_stopped_empty">Recording stopped — no ECU data received yet</string>
+    <string name="live_rec_done_title">Live recording finished</string>
+    <string name="live_rec_done_summary_fmt">Duration: %1$s\nSnapshots (1s step): %2$d\nParameters recorded: %3$d\n\n%4$s</string>
+    <string name="live_rec_copy_all">Copy entire log</string>
+    <string name="live_rec_copied_toast_fmt">Live recording copied to clipboard (%1$d rows, %2$d params)</string>
+    <string name="live_rec_export_title">Export Live recording</string>
+    <string name="live_rec_export_meta_fmt">Duration: %1$s · %2$d rows (1s step)\nParameters: %3$d (%4$d changing)%5$s</string>
+    <string name="live_rec_export_marks_suffix_fmt"> · Marks: %d</string>
+    <string name="live_rec_opt_save_csv_title">Save CSV spreadsheet (.csv)</string>
+    <string name="live_rec_opt_save_csv_sub_fmt">Choose folder (Downloads, etc.) · Excel / Sheets · %s</string>
+    <string name="live_rec_opt_share_csv_title">Send CSV file (Share)</string>
+    <string name="live_rec_opt_share_csv_sub_fmt">Attach .csv to Telegram, WhatsApp, Mail · %s</string>
+    <string name="live_rec_opt_copy_summary_title">Copy smart summary (for chat / AI)</string>
+    <string name="live_rec_opt_copy_summary_sub_fmt">Min / Avg / Max + key events &amp; marks · %s</string>
+    <string name="live_rec_opt_copy_full_title">Copy full per-second log</string>
+    <string name="live_rec_opt_copy_full_sub_fmt">All %1$d rows as text to clipboard · %2$s</string>
+    <string name="live_rec_csv_saved_toast_fmt">CSV table saved (%s)</string>
+    <string name="live_rec_csv_save_failed_toast">Failed to save CSV file</string>
+    <string name="live_rec_summary_copied_toast_fmt">Smart summary copied to clipboard (%s)</string>
+    <string name="live_rec_share_caption_fmt">AndrOBD2 Live CSV · %1$s (%2$d rows, %3$d params)</string>
+    <string name="dialog_close">Close</string>
+    <string name="live_rec_col_time">Time</string>
+    <string name="live_rec_col_sec">Sec</string>
+    <string name="live_rec_section_constant_fmt">[Constant parameters — unchanged (%d)]</string>
+    <string name="live_rec_section_dynamic_fmt">[Per-second dynamics — changing parameters (%d)]</string>
+    <string name="live_rec_monitors_prefix_fmt">Monitors [%s]</string>
+    <string name="live_rec_inactive_group">Inactive / N/A</string>
+    <string name="live_rec_all_constant_note"># All parameters remained constant throughout the recording.</string>
+    <string name="live_rec_connect_needed">Start Live Data (adapter or Demo) before recording</string>
+    <string name="live_rec_mark">+ Mark</string>
+    <string name="live_rec_mark_fmt">+ Mark (%d)</string>
+    <string name="live_rec_mark_added_fmt">Marker %s added</string>
+    <string name="live_rec_col_mark">Mark</string>
+    <string name="preset_all">All</string>
+    <string name="preset_fav">★ Favorites</string>
+    <string name="preset_startup">Startup</string>
+    <string name="preset_fuel">Fuel &amp; Trim</string>
+    <string name="preset_driving">Driving</string>
+    <string name="empty_no_favorites">Tap ★ on any parameter to pin it to Favorites</string>
+    <string name="fav_toggle_desc">Toggle favorite parameter</string>
+    <string name="status_reconnecting_fmt">Retry %1$d/%2$d</string>
+    <string name="reconnecting_keep_log_toast">Connection interrupted — auto-reconnecting…</string>
+    <string name="voltage_badge_fmt">%.1f V</string>
+    <string name="poll_rate_badge_fmt">%.0f/s</string>
+    <string name="copy_dtc_report">Copy report</string>
+    <string name="dtc_report_title">AndrOBD2 Diagnostic Report</string>
+    <string name="dtc_report_mil_on">Check Engine: ON</string>
+    <string name="dtc_report_mil_off">Check Engine: OFF</string>
+    <string name="dtc_report_snapshot_section">Engine Conditions</string>
+    <string name="dtc_report_copied_toast">Diagnostic report copied to clipboard</string>
+    <string name="chart_win_30s">30s</string>
+    <string name="chart_win_2m">2m</string>
+    <string name="chart_win_5m">5m</string>
+    <string name="chart_win_all">All</string>
+    <string name="chart_pause">Pause</string>
+    <string name="chart_resume">Live</string>
+    <string name="chart_touch_hint">Drag across chart to inspect values · Tap legend card to toggle series</string>
+    <string name="dashboard_short">Gauges</string>
+    <string name="select_all_items">Select all</string>
+    <string name="hud_mirror_toggle">Mirror</string>
+    <string name="range_min_label">Min</string>
+    <string name="range_max_label">Max</string>
+    <string name="session_status_label">CONNECTION</string>
+
+    <!-- Vehicle profiles (brand strings live in strings_jaguar.xml & strings_kia.xml) -->
+    <string name="vehicle_profile_title">Vehicle profile</string>
+    <string name="vehicle_profile_summary">Manufacturer fault codes, extended PIDs &amp; ECU module scan</string>
+    <string name="vehicle_profile_standard">Standard OBD-II (any car)</string>
+    <string-array name="vehicle_profile_options" translatable="false">
+        <item>@string/vehicle_profile_standard</item>
+        <item>@string/vehicle_profile_kia_auto</item>
+        <item>@string/vehicle_profile_kia_petrol</item>
+        <item>@string/vehicle_profile_kia_diesel</item>
+        <item>@string/vehicle_profile_jaguar_auto</item>
+        <item>@string/vehicle_profile_jaguar_x200</item>
+        <item>@string/vehicle_profile_jaguar_x202</item>
+        <item>@string/vehicle_profile_volvo_p2</item>
+        <item>@string/vehicle_profile_volvo_spa</item>
+        <item>@string/volvo_variant_p2_original</item>
+        <item>@string/volvo_variant_p2_facelift</item>
+        <item>@string/volvo_variant_p2_late</item>
+        <item>@string/volvo_variant_spa_original</item>
+        <item>@string/volvo_variant_spa_facelift</item>
+        <item>@string/volvo_variant_spa_late</item>
+        <item>@string/volvo_variant_spa_second</item>
+    </string-array>
+    <string-array name="vehicle_profile_values" translatable="false">
+        <item>standard</item>
+        <item>kia_venga_auto</item>
+        <item>kia_venga_petrol</item>
+        <item>kia_venga_diesel</item>
+        <item>jaguar_stype_auto</item>
+        <item>jaguar_stype_x200</item>
+        <item>jaguar_stype_x202</item>
+        <item>volvo_xc90_p2</item>
+        <item>volvo_xc90_spa</item>
+        <item>volvo_xc90_p2_2003_2006</item>
+        <item>volvo_xc90_p2_2007_2011</item>
+        <item>volvo_xc90_p2_2012_2014</item>
+        <item>volvo_xc90_spa_2016_2019</item>
+        <item>volvo_xc90_spa_2020_2021</item>
+        <item>volvo_xc90_spa_2022_2025</item>
+        <item>volvo_xc90_spa_2025_5</item>
+    </string-array>
+    <string name="vehicle_scan_module">Scan module</string>
+    <string name="vehicle_scanning_fmt">Scanning %s…</string>
+    <string name="vehicle_clear_module_fmt">Clear fault codes in %s?</string>
+    <string name="dtc_status_pass">System Pass</string>
+    <string name="dtc_status_readiness">Readiness</string>
+    <string name="dtc_report_profile_fmt">Profile: %s</string>
+    <string name="dtc_report_module_fmt">Module: %s</string>
+
+    <string name="log_viewer">CSV logs and charts</string>
+    <string name="log_open">Open CSV file</string>
+    <string name="log_recent">Recent files</string>
+    <string name="log_hint">Offline viewer. Select up to four channels. Each curve has its own scale; drag to inspect values.</string>
+    <string name="log_channels">Select channels (up to 4)</string>
+    <string name="log_marks">Go to marker</string>
+    <string name="log_analysis">Preliminary observations</string>
+    <string name="log_loading">Reading CSV…</string>
+    <string name="log_error">Cannot read CSV: invalid, too large, or permission expired. Open it again using the file picker.</string>
+    <string name="log_meta">%1$d samples · %2$d s · %3$d numeric channels</string>
+    <string name="log_insufficient">Insufficient data for analysis. This does not confirm vehicle health.</string>
+    <string name="scan_all">Scan all modules</string>
+    <string name="scan_all_info">Read-only scan for the selected vehicle profile. Park safely, keep ignition on. No codes will be cleared. Unsupported modules may not respond.</string>
+    <string name="scan_unavailable">Select a vehicle profile and connect first. Stop Live recording before scanning.</string>
+    <string name="scan_wait">Scanning modules…</string>
+    <string name="scan_no_response">No confirmed response / unsupported</string>
+    <string name="scan_response">Response received; codes: </string>
+    <string name="scan_timeout">Scan timed out. Results may be incomplete.</string>
 </resources>

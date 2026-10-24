@@ -22,7 +22,10 @@ import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.pvs.PvList;
@@ -30,9 +33,7 @@ import com.fr3ts0n.pvs.PvList;
 import java.util.Collection;
 
 /**
- * Adapter to display OBD TID items from a process variable list
- *
- * @author erwin
+ * Adapter to display OBD Test Control (TID) items from a process variable list.
  */
 public class TidItemAdapter extends ObdItemAdapter
 {
@@ -50,7 +51,6 @@ public class TidItemAdapter extends ObdItemAdapter
     @Override
     public View getView(int position, View convertView, ViewGroup parent)
     {
-        // get data PV
         EcuDataPv currPv = (EcuDataPv) getItem(position);
 
         if (convertView == null)
@@ -58,17 +58,37 @@ public class TidItemAdapter extends ObdItemAdapter
             convertView = mInflater.inflate(R.layout.obd_item, parent, false);
         }
 
-        // Show icon
+        if (currPv == null)
+        {
+            return convertView;
+        }
+
+        int accentColor = ContextCompat.getColor(getContext(), R.color.accent_primary);
+        View itemAccent = convertView.findViewById(R.id.item_accent);
+        tintViewBackground(itemAccent, accentColor);
+
         ImageView ivIcon = convertView.findViewById(R.id.obd_icon);
+        ivIcon.setImageResource(R.drawable.ic_slideshow);
+        ivIcon.setColorFilter(accentColor);
         ivIcon.setVisibility(View.VISIBLE);
 
-        // Hide value
-        TextView tvValue = convertView.findViewById(R.id.obd_value);
-        tvValue.setVisibility(View.GONE);
+        TextView tvLabel = convertView.findViewById(R.id.obd_label);
+        tvLabel.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
 
-        // set description
-        TextView tvUnits = convertView.findViewById(R.id.obd_units);
-        tvUnits.setText(String.valueOf(currPv.get(EcuDataPv.FID_DESCRIPT)));
+        TextView tvValueWide = convertView.findViewById(R.id.obd_value_wide);
+        if (tvValueWide != null) tvValueWide.setVisibility(View.GONE);
+
+        TextView tvSublabel = convertView.findViewById(R.id.obd_sublabel);
+        if (tvSublabel != null) tvSublabel.setVisibility(View.GONE);
+
+        View valueColumn = convertView.findViewById(R.id.value_column);
+        if (valueColumn != null) valueColumn.setVisibility(View.GONE);
+
+        ImageView ivFavStar = convertView.findViewById(R.id.iv_fav_star);
+        if (ivFavStar != null) ivFavStar.setVisibility(View.GONE);
+
+        ProgressBar bar = convertView.findViewById(R.id.bar);
+        if (bar != null) bar.setVisibility(View.GONE);
 
         return convertView;
     }

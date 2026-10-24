@@ -18,278 +18,324 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
+import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.PowerManager;
 import android.util.DisplayMetrics;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.ListAdapter;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.fr3ts0n.ecu.BitmapConversion;
+import com.fr3ts0n.ecu.Conversion;
 import com.fr3ts0n.ecu.EcuDataItem;
 import com.fr3ts0n.ecu.EcuDataItems;
 import com.fr3ts0n.ecu.EcuDataPv;
+import com.fr3ts0n.ecu.HashConversion;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
 import com.github.anastr.speedviewlib.Gauge;
 
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
-
+import java.util.TreeSet;
 
 /**
- * Display selected data items as dashboard
+ * Display selected Live Data items as responsive Dashboard gauges or windshield Head-Up Display (HUD).
  */
 public class DashBoardActivity extends AppCompatActivity
 		implements PvChangeListener, ObdGaugeAdapter.OnItemLongClickListener
 {
-	/**
-	 * For passing the index number of the <code>Sensor</code> in its
-	 * <code>SensorManager</code>
-	 */
 	public static final String POSITIONS = "POSITIONS";
-	/**
-	 * For passing the resource id of the <code>dashboard display</code>
-	 */
 	public static final String RES_ID = "RES_ID";
 
-	/**
-	 * Minimum size for gauges to be displayed
-	 */
-	private static int MIN_GAUGE_SIZE = 300; /* dp */
-
-	/**
-	 * the wake lock to keep app communication alive
-	 */
 	private PowerManager.WakeLock wakeLock;
 	private transient ObdGaugeAdapter adapter;
 	private transient RecyclerView grid;
 	private transient GridLayoutManager gridLayoutManager;
 
-	/** Map to uniquely collect PID numbers */
-	private final HashSet<Integer> pidNumbers = new HashSet<>();
+	private final TreeSet<Integer> pidNumbers = new TreeSet<>();
+	private final List<EcuDataPv> observedPvs = new ArrayList<>();
 
 	protected static final int MESSAGE_UPDATE_VIEW = 1;
 
 	private static ListAdapter mAdapter = null;
-	/** display metrics */
 	private static final DisplayMetrics metrics = new DisplayMetrics();
-
-	/** record positions to be charted */
 	private transient int[] positions;
 
-	/** data adapter as source of display data */
 	public static ListAdapter getAdapter()
 	{
 		return mAdapter;
 	}
 
-	// screen distribution matrix
-	private static final int[][] rowCols=
-	{
-		{1,1},{1,1},{2,1},{2,2},{2,2},{3,2},{3,2},{4,2},{4,2},{3,3},
-		{4,3},{4,3},{4,3},{4,4},{4,4},{4,4},{4,4},{5,4},{5,4},{5,4},{5,4}
-	};
-
-
-	/**
-	 * Set list adapter as data source of display
-	 * @param Adapter List adapter
-	 */
 	public static void setAdapter(ListAdapter Adapter)
 	{
 		mAdapter = Adapter;
 	}
 
-	/**
-	 * Handle message requests using modern Handler implementation
-	 */
-	protected transient final Handler mHandler = new Handler(android.os.Looper.getMainLooper())
+	protected transient final Handler mHandler = new Handler(Looper.getMainLooper())
 	{
 		@Override
-		public void handleMessage(Message msg)
+		public void handleMessage(@NonNull Message msg)
 		{
-
-			switch (msg.what)
+			if (msg.what == MESSAGE_UPDATE_VIEW && grid != null && msg.obj instanceof EcuDataPv)
 			{
-				case MESSAGE_UPDATE_VIEW:
-					EcuDataPv currPv = (EcuDataPv)msg.obj;
-					RecyclerView.ViewHolder holder = grid.findViewHolderForAdapterPosition(msg.arg1);
-					if(holder instanceof ObdGaugeAdapter.GaugeViewHolder)
+				EcuDataPv currPv = (EcuDataPv) msg.obj;
+				RecyclerView.ViewHolder holder = grid.findViewHolderForAdapterPosition(msg.arg1);
+				if (holder instanceof ObdGaugeAdapter.GaugeViewHolder)
+				{
+					Gauge gauge = ((ObdGaugeAdapter.GaugeViewHolder) holder).gauge;
+					Object rawVal = currPv.get(EcuDataPv.FID_VALUE);
+					if (gauge != null && rawVal instanceof Number)
 					{
-						Gauge gauge = ((ObdGaugeAdapter.GaugeViewHolder)holder).gauge;
-						if(gauge != null)
-						{
-							Number val = (Number)currPv.get(EcuDataPv.FID_VALUE);
-							gauge.speedTo(val.floatValue());
-						}
+						gauge.speedTo(((Number) rawVal).floatValue(), 300);
 					}
-					break;
+				}
 			}
 		}
 	};
 
-	/**
-	 * Update scaling of dashboard items
-	 *
-	 * Used for:
-	 * - start/resume activity
-	 * - screen size / orientation change
-	 */
-	void updateDashboardScaling()
+	private void detachPvListeners()
 	{
-		// calculate minimum gauge size (1.6 inch) based on screen density
-		getWindowManager().getDefaultDisplay().getMetrics(metrics);
-		MIN_GAUGE_SIZE = Math.min( metrics.densityDpi * 15 / 10,
-								   Math.min(metrics.widthPixels, metrics.heightPixels));
-
-		int height = metrics.heightPixels;
-		int width = metrics.widthPixels;
-		int numColumns = Math.max(1, Math.min(positions.length, width / MIN_GAUGE_SIZE));
-		int numRows = Math.max(1, Math.min(positions.length, height / MIN_GAUGE_SIZE));
-
-		// distribute gauges on screen
-		if(positions.length < numColumns*numRows)
+		for (EcuDataPv pv : observedPvs)
 		{
-			// read for corresponding number of gauges & orientation
-			numColumns = rowCols[positions.length][(width>height)?0:1];
-		}
-		/* get grid object */
-		gridLayoutManager.setSpanCount(numColumns);
-
-		adapter.clear();
-		pidNumbers.clear();
-		for (int position : positions)
-		{
-			// get corresponding Process variable
-			EcuDataPv currPv = (EcuDataPv) mAdapter.getItem(position);
-			if (currPv != null)
+			try
 			{
-				pidNumbers.add(currPv.getAsInt(EcuDataPv.FID_PID));
-				adapter.add(currPv);
-				currPv.addPvChangeListener(this, PvChangeEvent.PV_MODIFIED);
+				pv.removePvChangeListener(this);
+			} catch (Exception ignored)
+			{
 			}
 		}
-		grid.setAdapter(adapter);
+		observedPvs.clear();
 	}
 
+	void updateDashboardScaling()
+	{
+		getWindowManager().getDefaultDisplay().getMetrics(metrics);
+		float density = Math.max(1f, metrics.density);
+		float widthDp = metrics.widthPixels / density;
+
+		detachPvListeners();
+		adapter.clear();
+		pidNumbers.clear();
+
+		if (positions != null && mAdapter != null)
+		{
+			for (int position : positions)
+			{
+				if (position < 0 || position >= mAdapter.getCount()) continue;
+				Object item = mAdapter.getItem(position);
+				if (!(item instanceof EcuDataPv)) continue;
+				EcuDataPv currPv = (EcuDataPv) item;
+				if (!isContinuousGaugePv(currPv)) continue;
+
+				int pid = currPv.getAsInt(EcuDataPv.FID_PID);
+				if (pid > 0)
+				{
+					pidNumbers.add(pid);
+				}
+				adapter.add(currPv);
+				currPv.addPvChangeListener(this, PvChangeEvent.PV_MODIFIED);
+				observedPvs.add(currPv);
+			}
+		}
+
+		int count = adapter.getItemCount();
+		int numColumns;
+		if (count <= 1)
+		{
+			numColumns = 1;
+		} else if (widthDp < 520f)
+		{
+			numColumns = (count == 2) ? 1 : 2;
+		} else if (widthDp < 840f)
+		{
+			numColumns = Math.min(count, (count <= 4) ? 2 : 3);
+		} else
+		{
+			numColumns = Math.min(count, 4);
+		}
+
+		gridLayoutManager.setSpanCount(Math.max(1, numColumns));
+		adapter.setColumnWidthDp((widthDp - 16f) / Math.max(1, numColumns));
+		grid.setAdapter(adapter);
+
+		View tvEmpty = findViewById(R.id.tv_dashboard_empty);
+		if (tvEmpty != null)
+		{
+			tvEmpty.setVisibility(count == 0 ? View.VISIBLE : View.GONE);
+		}
+	}
+
+	private static boolean isContinuousGaugePv(EcuDataPv pv)
+	{
+		Object val = pv.get(EcuDataPv.FID_VALUE);
+		if (!(val instanceof Number)) return false;
+		Object cnvObj = pv.get(EcuDataPv.FID_CNVID);
+		if (cnvObj instanceof Conversion[])
+		{
+			Conversion[] cnvs = (Conversion[]) cnvObj;
+			if (EcuDataItem.cnvSystem < cnvs.length && cnvs[EcuDataItem.cnvSystem] != null)
+			{
+				Conversion cnv = cnvs[EcuDataItem.cnvSystem];
+				if (cnv instanceof BitmapConversion || cnv instanceof HashConversion)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	@SuppressLint("WakelockTimeout")
 	@Override
 	public void onCreate(Bundle savedInstanceState)
 	{
-		// Apply locale before anything else
 		SettingsActivity.applyLocale(this);
-
 		super.onCreate(savedInstanceState);
-		// set to full screen
-		getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-		// keep main display on?
-		if(MainActivity.prefs.getBoolean("keep_screen_on", false))
+		if (MainActivity.prefs != null && MainActivity.prefs.getBoolean(MainActivity.PREF_FULLSCREEN, false))
+		{
+			getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		}
+
+		if (MainActivity.prefs != null && MainActivity.prefs.getBoolean("keep_screen_on", false))
 		{
 			getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 		}
-		// hide the action bar
+
 		ActionBar actionBar = getSupportActionBar();
 		if (actionBar != null) actionBar.hide();
 
-		// prevent activity from falling asleep
 		PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-		wakeLock = Objects.requireNonNull(powerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-			getString(R.string.app_name));
+		wakeLock = Objects.requireNonNull(powerManager).newWakeLock(
+				PowerManager.PARTIAL_WAKE_LOCK,
+				getPackageName() + ":DashboardWakeLock");
 		wakeLock.acquire();
 
-		// set the desired content screen
 		int resId = getIntent().getIntExtra(RES_ID, R.layout.dashboard);
 		setContentView(resId);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+
+		View btnBack = findViewById(R.id.btn_dashboard_back);
+		if (btnBack != null)
+		{
+			btnBack.setOnClickListener(v -> finish());
+		}
+
+		final MirrorRelativeLayout hudMirror = findViewById(R.id.hud_mirror_container);
+		final View btnMirror = findViewById(R.id.btn_hud_mirror);
+		if (hudMirror != null && btnMirror != null)
+		{
+			btnMirror.setSelected(hudMirror.isMirrored());
+			btnMirror.setOnClickListener(v -> {
+				boolean next = !hudMirror.isMirrored();
+				hudMirror.setMirrored(next);
+				btnMirror.setSelected(next);
+			});
+		}
+
 		grid = findViewById(R.id.dashboardGrid);
 		gridLayoutManager = new GridLayoutManager(this, 1);
 		grid.setLayoutManager(gridLayoutManager);
 
-		// create data adapter
-		adapter = new ObdGaugeAdapter( this,
-									   R.layout.obd_gauge);
+		adapter = new ObdGaugeAdapter(this, R.layout.obd_gauge);
 		adapter.setOnItemLongClickListener(this);
 
-		/* get PIDs to be shown */
 		positions = getIntent().getIntArrayExtra(POSITIONS);
+		if (positions == null)
+		{
+			positions = new int[0];
+		}
 	}
 
-	/**
-	 * Handle destroy of the Activity
-	 */
 	@Override
 	protected void onDestroy()
 	{
-		// reset PID limiting
+		detachPvListeners();
 		ObdProt.resetFixedPid();
-		adapter.clear();
-		// allow sleeping again
-		wakeLock.release();
+		if (adapter != null)
+		{
+			adapter.clear();
+		}
+		if (wakeLock != null && wakeLock.isHeld())
+		{
+			wakeLock.release();
+		}
 		super.onDestroy();
 	}
 
-	/* (non-Javadoc)
-	 * @see android.app.Activity#onResume()
-	 */
 	@Override
 	protected void onResume()
 	{
 		super.onResume();
-		// set scaling of dashboard items
 		updateDashboardScaling();
-		// limit selected PIDs to selection
-		MainActivity.setFixedPids(pidNumbers);
+		if (!pidNumbers.isEmpty())
+		{
+			ObdProt.resetFixedPid();
+			MainActivity.setFixedPids(pidNumbers);
+		}
 	}
 
 	@Override
-	public void onConfigurationChanged(Configuration newConfig)
+	public void onConfigurationChanged(@NonNull Configuration newConfig)
 	{
 		super.onConfigurationChanged(newConfig);
 		updateDashboardScaling();
 	}
 
-	/* (non-Javadoc)
-	 * @see android.app.Activity#onPause()
-	 */
 	@Override
 	protected void onPause()
 	{
-		adapter.clear();
+		detachPvListeners();
+		if (adapter != null)
+		{
+			adapter.clear();
+		}
 		super.onPause();
 	}
 
 	@Override
 	public void pvChanged(PvChangeEvent event)
 	{
-		if(event.getKey().equals(EcuDataPv.FIELDS[EcuDataPv.FID_VALUE])
-				&& event.getValue() instanceof Number)
+		if (event != null
+				&& EcuDataPv.FIELDS[EcuDataPv.FID_VALUE].equals(event.getKey())
+				&& event.getValue() instanceof Number
+				&& event.getSource() instanceof EcuDataPv)
 		{
-			int pos = adapter.getPosition((EcuDataPv)event.getSource());
-			Message msg = mHandler.obtainMessage(MESSAGE_UPDATE_VIEW, pos,0, event.getSource());
-			mHandler.sendMessage(msg);
+			int pos = adapter.getPosition((EcuDataPv) event.getSource());
+			if (pos >= 0)
+			{
+				Message msg = mHandler.obtainMessage(MESSAGE_UPDATE_VIEW, pos, 0, event.getSource());
+				mHandler.sendMessage(msg);
+			}
 		}
 	}
 
 	@Override
 	public boolean onItemLongClick(int position)
 	{
-		// Set data item to be customized
 		EcuDataPv pv = adapter.getItem(position);
+		if (pv == null) return false;
 		EcuDataItem item = EcuDataItems.byMnemonic.get(pv.get(EcuDataPv.FID_MNEMONIC));
+		if (item == null) return false;
 		PidCustomization.item = item;
 
-		// start customization ...
 		Intent intent = new Intent(this, PidCustomization.class);
 		startActivity(intent);
-
 		return true;
 	}
 }

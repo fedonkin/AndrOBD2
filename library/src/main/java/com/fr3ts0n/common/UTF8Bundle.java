@@ -1,5 +1,6 @@
 package com.fr3ts0n.common;
 
+import java.util.Locale;
 import java.util.ResourceBundle;
 
 /**
@@ -10,22 +11,28 @@ import java.util.ResourceBundle;
 
 public class UTF8Bundle
 {
-    private static ResourceBundle.Control ctrl = null;
+    private static ResourceBundle.Control ctrl = new UTF8Control();
 
     public UTF8Bundle(ResourceBundle.Control control)
     {
-        ctrl = control;
+        if (control != null)
+        {
+            ctrl = control;
+        }
     }
 
     public static ResourceBundle getBundle(String bundleName)
     {
+        return getBundle(bundleName, Locale.getDefault());
+    }
+
+    public static ResourceBundle getBundle(String bundleName, Locale locale)
+    {
+        Locale targetLocale = (locale != null) ? locale : Locale.getDefault();
         if (ctrl != null)
         {
-            return ResourceBundle.getBundle(bundleName, ctrl);
+            return ResourceBundle.getBundle(bundleName, targetLocale, ctrl);
         }
-        else
-        {
-            return ResourceBundle.getBundle(bundleName);
-        }
+        return ResourceBundle.getBundle(bundleName, targetLocale);
     }
 }

@@ -1,0 +1,131 @@
+{
+  "title": "Jaguar S-TYPE DTC Summaries",
+  "pages": 309,
+  "sha256": "9300ef0dee9496439ab72af7a42f59170399f4a989209ff636b3fbf64b6447a6",
+  "records": 1375,
+  "uniqueCodes": 799,
+  "sections": [
+    [
+      2,
+      61,
+      "Powertrain",
+      "2000"
+    ],
+    [
+      62,
+      122,
+      "Powertrain",
+      "2001–2002"
+    ],
+    [
+      123,
+      196,
+      "Powertrain",
+      "2003"
+    ],
+    [
+      197,
+      233,
+      "Body",
+      "2000–2002"
+    ],
+    [
+      234,
+      267,
+      "Body",
+      "2003"
+    ],
+    [
+      268,
+      282,
+      "Chassis",
+      "2000–2002"
+    ],
+    [
+      283,
+      299,
+      "Chassis",
+      "2003"
+    ],
+    [
+      300,
+      309,
+      "Network",
+      "2003"
+    ]
+  ],
+  "bookmarks": [
+    [
+      1,
+      "HOME",
+      -1
+    ],
+    [
+      1,
+      "Page 1",
+      1
+    ],
+    [
+      1,
+      "Powertrain DTC Summaries",
+      2
+    ],
+    [
+      2,
+      "2000 Model Year",
+      2
+    ],
+    [
+      2,
+      "2001 – 2002 Model Years",
+      62
+    ],
+    [
+      2,
+      "2003 Model Year",
+      123
+    ],
+    [
+      1,
+      "Body DTC Summaries",
+      197
+    ],
+    [
+      2,
+      "2000 – 2002 Model Years",
+      197
+    ],
+    [
+      2,
+      "2003 Model Year",
+      234
+    ],
+    [
+      1,
+      "Chassis DTC Summaries",
+      268
+    ],
+    [
+      2,
+      "2000 – 2002 Model Years",
+      268
+    ],
+    [
+      2,
+      "2003 Model Year",
+      283
+    ],
+    [
+      1,
+      "Network DTC Summaries",
+      300
+    ],
+    [
+      2,
+      "2003 Model Year",
+      300
+    ]
+  ],
+  "audit": [],
+  "extractor": "2.0"
+}

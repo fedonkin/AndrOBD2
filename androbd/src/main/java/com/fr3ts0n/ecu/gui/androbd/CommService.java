@@ -30,7 +30,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Abstract communication service
+ * Abstract communication service with lifecycle-safe state transitions.
  */
 public abstract class CommService
 {
@@ -57,9 +57,7 @@ public abstract class CommService
 		OFFLINE         ///< we are offline
 	}
 
-	// Debugging
 	static final String TAG = "CommService";
-
 	static final Logger log = Logger.getLogger(TAG);
 
 	public static final ElmProt elm = new ElmProt();
@@ -67,34 +65,20 @@ public abstract class CommService
 	Context mContext;
 	private Handler mHandler = null;
 	STATE mState;
+	protected volatile boolean stopping = false;
 
-	/**
-	 * Constructor. Prepares a new Communication session.
-	 */
 	CommService()
 	{
 		super();
-		// mAdapter = MainActivity.mBluetoothAdapter;
 		mState = STATE.NONE;
 	}
 
-	/**
-	 * Constructor. Prepares a new Communication session.
-	 *
-	 * @param handler A Handler to send messages back to the UI Activity
-	 */
 	private CommService(Handler handler)
 	{
 		this();
 		mHandler = handler;
 	}
 
-	/**
-	 * Constructor. Prepares a new Bluetooth Communication session.
-	 *
-	 * @param context The UI Activity Context
-	 * @param handler A Handler to send messages back to the UI Activity
-	 */
 	CommService(Context context, Handler handler)
 	{
 		this(handler);
@@ -102,52 +86,36 @@ public abstract class CommService
 	}
 
 	/**
-	 * Set the current state of the chat connection
-	 *
-	 * @param state An integer defining the current connection state
+	 * Update state and notify UI handler unless this service was already stopped intentionally.
+	 * Encodes state ordinal in msg.arg1 and passes msg.obj = state (with msg.arg2 = System.identityHashCode(this))
+	 * so MainActivity can ignore stale callbacks from superseded CommService instances.
 	 */
 	synchronized void setState(STATE state)
 	{
 		log.log(Level.FINE, "setState() " + mState + " -> " + state);
 		mState = state;
-
-		// Give the new state to the Handler so the UI Activity can update
-		mHandler.obtainMessage(MainActivity.MESSAGE_STATE_CHANGE, state).sendToTarget();
+		if (mHandler != null && !stopping)
+		{
+			Message msg = mHandler.obtainMessage(
+					MainActivity.MESSAGE_STATE_CHANGE,
+					state.ordinal(),
+					System.identityHashCode(this),
+					state);
+			msg.sendToTarget();
+		}
 	}
 
-	/**
-	 * Return the current connection state.
-	 * @return current connection state
-	 */
 	synchronized STATE getState()
 	{
 		return mState;
 	}
 
-	/**
-	 * Start the chat service. Specifically start AcceptThread to begin a session
-	 * in listening (server) mode. Called by the Activity onResume()
-	 */
 	protected abstract void start();
 
-	/**
-	 * Stop all threads
-	 */
 	public abstract void stop();
 
-	/**
-	 * Write to the output device in an un-synchronized manner
-	 *
-	 * @param out The bytes to write
-	 */
 	public abstract void write(byte[] out);
 
-	/**
-	 * start connection to specified device
-	 *
-	 * @param device The device to connect
-	 * @param secure Socket Security type - Secure (true) , Insecure (false)
-	 */
 	public abstract void connect(Object device, boolean secure);
 
 	/**
@@ -155,31 +123,49 @@ public abstract class CommService
 	 */
 	void connectionFailed()
 	{
+		if (stopping) return;
+		Handler handler = mHandler;
+		Context ctx = mContext;
+		int selfId = System.identityHashCode(this);
 		stop();
-		// set new state offline
-		setState(STATE.OFFLINE);
-		// Send a failure message back to the Activity
-		Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_TOAST);
-		Bundle bundle = new Bundle();
-		bundle.putString(MainActivity.TOAST, mContext.getString(R.string.unabletoconnect));
-		msg.setData(bundle);
-		mHandler.sendMessage(msg);
+		if (handler != null && ctx != null)
+		{
+			handler.obtainMessage(
+					MainActivity.MESSAGE_STATE_CHANGE,
+					STATE.OFFLINE.ordinal(),
+					selfId,
+					STATE.OFFLINE).sendToTarget();
+			Message msg = handler.obtainMessage(MainActivity.MESSAGE_TOAST);
+			Bundle bundle = new Bundle();
+			bundle.putString(MainActivity.TOAST, ctx.getString(R.string.unabletoconnect));
+			msg.setData(bundle);
+			handler.sendMessage(msg);
+		}
 	}
 
 	/**
-	 * Indicate that the connection was lost and notify the UI Activity.
+	 * Indicate that an established connection was unexpectedly lost.
 	 */
 	void connectionLost()
 	{
+		if (stopping) return;
+		Handler handler = mHandler;
+		Context ctx = mContext;
+		int selfId = System.identityHashCode(this);
 		stop();
-		// set new state offline
-		setState(STATE.OFFLINE);
-		// Send a failure message back to the Activity
-		Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_TOAST);
-		Bundle bundle = new Bundle();
-		bundle.putString(MainActivity.TOAST, mContext.getString(R.string.connectionlost));
-		msg.setData(bundle);
-		mHandler.sendMessage(msg);
+		if (handler != null && ctx != null)
+		{
+			handler.obtainMessage(
+					MainActivity.MESSAGE_STATE_CHANGE,
+					STATE.OFFLINE.ordinal(),
+					selfId,
+					STATE.OFFLINE).sendToTarget();
+			Message msg = handler.obtainMessage(MainActivity.MESSAGE_TOAST);
+			Bundle bundle = new Bundle();
+			bundle.putString(MainActivity.TOAST, ctx.getString(R.string.connectionlost));
+			msg.setData(bundle);
+			handler.sendMessage(msg);
+		}
 	}
 
 	/**
@@ -187,14 +173,16 @@ public abstract class CommService
 	 */
 	void connectionEstablished(String deviceName)
 	{
-		// Send the name of the connectionEstablished device back to the UI Activity
+		if (stopping || mHandler == null) return;
+		String safeName = (deviceName != null && !deviceName.trim().isEmpty())
+				? deviceName.trim()
+				: "OBD-II";
 		Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_DEVICE_NAME);
 		Bundle bundle = new Bundle();
-		bundle.putString(MainActivity.DEVICE_NAME, deviceName);
+		bundle.putString(MainActivity.DEVICE_NAME, safeName);
 		msg.setData(bundle);
 		mHandler.sendMessage(msg);
 
-		// set state to connected
 		setState(STATE.CONNECTED);
 	}
 }

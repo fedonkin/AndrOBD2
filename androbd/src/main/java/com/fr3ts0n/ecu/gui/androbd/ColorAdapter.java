@@ -1,45 +1,46 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuDataPv;
 
+import java.util.Locale;
+
 /**
- * Adapter to handle display colors of data items
- * - automatic color selection based on item id/position
- * - support for customization
+ * High-contrast technical palette for OBD-II series, gauges, and accent indicators.
+ * Legible on both Light (#FFFFFF) and Dark (#111722) surfaces.
  */
-public class ColorAdapter
-    extends ArrayAdapter<Integer>
+public class ColorAdapter extends ArrayAdapter<Integer>
 {
-    /**
-     * List of colors to be used for series
-     */
     static final Integer[] colors =
     {
-        0xFFF44336, // RED 500
-        0xFFE91E63, // PINK 500
-        0xFFFF2C93, // LIGHT PINK 500
-        0xFF9C27B0, // PURPLE 500
-        0xFF673AB7, // DEEP PURPLE 500
-        0xFF3F51B5, // INDIGO 500
-        0xFF2196F3, // BLUE 500
-        0xFF03A9F4, // LIGHT BLUE 500
-        0xFF00BCD4, // CYAN 500
-        0xFF009688, // TEAL 500
-        0xFF4CAF50, // GREEN 500
-        0xFF8BC34A, // LIGHT GREEN 500
-        0xFFCDDC39, // LIME 500
-        0xFFFFEB3B, // YELLOW 500
-        0xFFFFC107, // AMBER 500
-        0xFFFF9800, // ORANGE 500
-        0xFF795548, // BROWN 500
-        0xFF607D8B, // BLUE GREY 500
-        0xFF9E9E9E, // GREY 500
+        0xFF2563EB, // Cobalt Blue
+        0xFF059669, // Emerald
+        0xFFD97706, // Amber
+        0xFFDC2626, // Crimson
+        0xFF0891B2, // Cyan
+        0xFF7C3AED, // Violet
+        0xFFDB2777, // Rose
+        0xFF0D9488, // Teal
+        0xFFEA580C, // Deep Orange
+        0xFF4F46E5, // Indigo
+        0xFF16A34A, // Green
+        0xFF9333EA, // Purple
+        0xFF0284C7, // Sky Blue
+        0xFFB45309, // Warm Ochre
+        0xFF475569, // Slate
+        0xFFBE123C, // Ruby
     };
 
     public ColorAdapter(Context context, int resource)
@@ -47,28 +48,17 @@ public class ColorAdapter
         super(context, resource, colors);
     }
 
-    /**
-     * get color for an ID number preferrably unique pid number
-     * this is to get persistent coloring/lining for each id
-     * @param id id to get color for
-     * @return color for given ID
-     */
     public static int getItemColor(int id)
     {
-        return colors[id % colors.length];
+        int n = colors.length;
+        return colors[((id % n) + n) % n];
     }
 
-    /**
-     * Get color for a specified EcuDataItem
-     * - includes customisation settings
-     *
-     * @param currPv current EcuDataPv
-     * @return Display color for given EcuDataPv
-     */
     public static int getItemColor(EcuDataPv currPv)
     {
-        Integer pidColor = (Integer)currPv.get(EcuDataPv.FID_COLOR);
-        if(pidColor == null)
+        if (currPv == null) return colors[0];
+        Integer pidColor = (Integer) currPv.get(EcuDataPv.FID_COLOR);
+        if (pidColor == null)
         {
             int pid = currPv.getAsInt(EcuDataPv.FID_PID);
             pidColor = ColorAdapter.getItemColor(pid);
@@ -76,23 +66,58 @@ public class ColorAdapter
         return pidColor;
     }
 
-    @Override
-    public View getView(int position, View convertView, ViewGroup parent)
+    private int dp(int v)
     {
-        TextView view = (TextView)super.getView(position, convertView, parent);
-        view.setBackgroundColor(getItemColor(position));
-        view.setText("");
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, v, getContext().getResources().getDisplayMetrics()));
+    }
 
-        return view;
+    private View buildSwatchRow(int position, boolean dropdown)
+    {
+        int color = getItemColor(position);
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int hPad = dp(12);
+        int vPad = dp(dropdown ? 10 : 8);
+        row.setPadding(hPad, vPad, hPad, vPad);
+        if (dropdown)
+        {
+            row.setBackgroundColor(ContextCompat.getColor(getContext(), R.color.bg_surface));
+        }
+
+        View swatch = new View(getContext());
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(dp(28), dp(18));
+        sLp.setMarginEnd(dp(10));
+        swatch.setLayoutParams(sLp);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.RECTANGLE);
+        gd.setCornerRadius(dp(4));
+        gd.setColor(color);
+        gd.setStroke(dp(1), ContextCompat.getColor(getContext(), R.color.stroke_card));
+        swatch.setBackground(gd);
+        row.addView(swatch);
+
+        TextView label = new TextView(getContext());
+        label.setText(String.format(Locale.US, "#%06X", (0xFFFFFF & color)));
+        label.setTextColor(ContextCompat.getColor(getContext(), R.color.text_primary));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        label.setFontFeatureSettings("tnum");
+        row.addView(label);
+
+        return row;
+    }
+
+    @NonNull
+    @Override
+    public View getView(int position, View convertView, @NonNull ViewGroup parent)
+    {
+        return buildSwatchRow(position, false);
     }
 
     @Override
-    public View getDropDownView(int position, View convertView, ViewGroup parent)
+    public View getDropDownView(int position, View convertView, @NonNull ViewGroup parent)
     {
-        TextView view = (TextView)super.getDropDownView(position, convertView, parent);
-        view.setBackgroundColor(getItemColor(position));
-        view.setText("");
-
-        return view;
+        return buildSwatchRow(position, true);
     }
 }

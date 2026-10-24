@@ -18,13 +18,21 @@
 
 package com.fr3ts0n.ecu.prot.obd;
 
+import com.fr3ts0n.ecu.EcuCodeItem;
+import com.fr3ts0n.ecu.ObdCodeItem;
+import com.fr3ts0n.ecu.prot.obd.vehicles.TelegramSink;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileHandler;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.prot.TelegramListener;
 import com.fr3ts0n.prot.TelegramWriter;
 
 import java.beans.PropertyChangeEvent;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.Vector;
@@ -52,6 +60,30 @@ public class ElmProt
 	 * property name for protocol status
 	 */
 	public static final String PROP_STATUS = "status";
+	/**
+	 * property name for multi-module DTC sweep progress (newValue = int[]{done, total})
+	 */
+	public static final String PROP_MODULE_SCAN_PROGRESS = "modscan";
+
+	private static final long ATRV_POLL_INTERVAL_MS = 2500L;
+
+	/**
+	 * Result entry for a single ECU module in a full multi-module DTC sweep.
+	 */
+	public static final class ModuleScanEntry
+	{
+		public final VehicleModule module;
+		public final List<EcuCodeItem> faultCodes;
+        public final boolean responseReceived;
+
+		public ModuleScanEntry(VehicleModule module, List<EcuCodeItem> faultCodes, boolean responseReceived)
+		{
+			this.module = module;
+            this.responseReceived = responseReceived;
+			this.faultCodes = Collections.unmodifiableList(
+					new ArrayList<EcuCodeItem>(faultCodes));
+		}
+	}
 	
 	/**
 	 * CAN protocol handler
@@ -92,6 +124,15 @@ public class ElmProt
 	 * last detected message counter ID
 	 */
 	private int lastMsgId = 0;
+
+	private long nextAtRvPollMs = 0L;
+	private boolean atRvUnsupported = false;
+
+	private final List<VehicleModule> pendingAllModuleQueue = new ArrayList<VehicleModule>();
+	private final List<ModuleScanEntry> completedModuleEntries = new ArrayList<ModuleScanEntry>();
+	private volatile VehicleModule currentScanningModule = null;
+	private int allModuleTotalCount = 0;
+    private boolean moduleResponseReceived;
 
 	/**
 	 * ELM protocol ID's
@@ -474,9 +515,19 @@ public class ElmProt
 		selectedEcuAddress = ecuAddress;
 		// ensure headers are off
 		pushCommand(CMD.SETHEADER, 0);
-		// set/clear RX filter
-		pushCommand((selectedEcuAddress != 0) ? CMD.SETCANRXFLT : CMD.CLRCANRXFLT,
-			selectedEcuAddress);
+		// set/clear RX filter (ATCRA is valid only for 11-bit/29-bit CAN IDs >= 0x100)
+		if (selectedEcuAddress >= 0x100)
+		{
+			pushCommand(CMD.SETCANRXFLT, selectedEcuAddress);
+		}
+		else if (selectedEcuAddress > 0)
+		{
+			pushTelegram(String.format(Locale.US, "ATSR%02X", Integer.valueOf(selectedEcuAddress)));
+		}
+		else
+		{
+			pushCommand(CMD.CLRCANRXFLT, 0);
+		}
 	}
 	
 	/**
@@ -602,10 +653,26 @@ public class ElmProt
 	}
 	
 	/**
+	 * Vehicle profile multi-module scan state (only used when a custom vehicle profile is active)
+	 */
+	private volatile boolean customModuleBusActive = false;
+	private volatile boolean moduleScanInProgress = false;
+	private volatile boolean detectedJ1850Pwm = false;
+	private volatile boolean demoCodesCleared = false;
+
+	/**
 	 * reset ELM adapter
 	 */
 	public void reset()
 	{
+		customModuleBusActive = false;
+		moduleScanInProgress = false;
+		detectedJ1850Pwm = false;
+		demoCodesCleared = false;
+		charsExpected = 0;
+		responsePending = false;
+		lastRxMsg = "";
+		VehicleProfileManager.resetSessionState();
 		// reset all learned protocol data
 		super.reset();
 		// either RESET or INFO command needs to be enabled
@@ -626,6 +693,7 @@ public class ElmProt
 		
 		// clear all identified ECU addresses
 		ecuAddresses.clear();
+		detectedJ1850Pwm = false;
 		// clear selected ECU
 		selectedEcuAddress = 0;
 		// remember to disable headers again
@@ -640,6 +708,9 @@ public class ElmProt
 	
 	private void initialize()
 	{
+		nextAtRvPollMs = 0L;
+		atRvUnsupported = false;
+        virtualPids.reset(PidPvs);
 		// set status to INITIALIZING
 		setStatus(STAT.INITIALIZING);
 		
@@ -706,6 +777,14 @@ public class ElmProt
 				int i;
 				int crc=0;
 				byte[] binBuff = fromHex(buffer);
+				int b0 = binBuff[0] & 0xFF;
+				int b1 = binBuff[1] & 0xFF;
+				// Headerless extended (61/62...) and module DTC/session replies (50/53/54/58/59)
+				// must never be sliced as raw ISO headers when last payload byte happens to match sum%256
+				if (b1 != 0x6B && b1 != 0xF1 && VehicleProfileManager.isUnframedPositiveReply(buffer))
+				{
+					return false;
+				}
 				for (i=0; i<binBuff.length-1; i++)
 				{
 					// treat each byte as unsigned - checksum is mod 256
@@ -796,8 +875,10 @@ public class ElmProt
 			
 			// received a PROMPT, what was the last response?
 			case PROMPT:
+				String rxBeforePrompt = lastRxMsg;
+				lastRxMsg = "";
 				// check for last received message
-				switch (getResponseId(lastRxMsg))
+				switch (getResponseId(rxBeforePrompt))
 				{
 					case NOCONN:
 					case NOCONN2:
@@ -808,6 +889,12 @@ public class ElmProt
 					case BUSINIERR3:
 					case BUSBUSY:
 					case FBERROR:
+						responsePending = false;
+						charsExpected = 0;
+						if (handleOptionalProfileFailure())
+						{
+							break;
+						}
 						setStatus(STAT.DISCONNECTED);
 						// re-queue last command
 						pushTelegram(String.valueOf(lastCommand));
@@ -820,42 +907,84 @@ public class ElmProt
 						break;
 					
 					case DATAERROR:
+						responsePending = false;
+						charsExpected = 0;
+						if (handleOptionalProfileFailure())
+						{
+							break;
+						}
 						setStatus(STAT.DATAERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
 					
 					case BUFFERFULL:
 					case RXERROR:
+						responsePending = false;
+						charsExpected = 0;
 						setStatus(STAT.RXERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
 					
 					case ERROR:
+						responsePending = false;
+						charsExpected = 0;
+						if (handleOptionalProfileFailure())
+						{
+							break;
+						}
 						setStatus(STAT.ERROR);
 						sendCommand(CMD.WARMSTART, 0);
 						break;
 
 					case NODATA:
-						setStatus(STAT.NODATA);
-						// re-queue next data item
-						if (service != OBD_SVC_NONE)
+						responsePending = false;
+						charsExpected = 0;
+						if (handleOptionalProfileFailure())
 						{
-							pushTelegram(
-								String.valueOf(
-									createTelegram(emptyBuffer, service, getNextSupportedPid()))
-							);
+							break;
 						}
-						// increase OBD timeout since we may expect answers too fast
-						mAdaptiveTiming.adapt(true);
-						// set to preferred protocol
-						pushCommand(CMD.SETPROT, preferredProtocol.ordinal());
-						// NO break here since reaction is only quqeued
+						if (service == OBD_SVC_READ_CODES
+								|| service == OBD_SVC_PENDINGCODES
+								|| service == OBD_SVC_PERMACODES)
+						{
+							// NODATA on 03/07/0A simply means no codes in that mode;
+							// continue draining remaining code modes without resetting protocol
+							if (cmdStack.isEmpty() && tCodes.isEmpty())
+							{
+								tCodes.put(0, new ObdCodeItem(0,
+										Messages.getString("no.trouble.codes.set")));
+							}
+						}
+						else
+						{
+							setStatus(STAT.NODATA);
+							// re-queue next data item for PID-polling services
+							if (service == OBD_SVC_DATA
+									|| service == OBD_SVC_FREEZEFRAME
+									|| service == OBD_SVC_VEH_INFO)
+							{
+								pushTelegram(
+									String.valueOf(
+										createTelegram(emptyBuffer, service, getNextSupportedPid()))
+								);
+							}
+							// increase OBD timeout since we may expect answers too fast
+							mAdaptiveTiming.adapt(true);
+							// set to preferred protocol
+							pushCommand(CMD.SETPROT, preferredProtocol.ordinal());
+						}
+						// NO break here since reaction is only queued
 					
 					case MODEL:
 					case SEARCH:
 					case STOPPED:
 						// was already handled before prompt
 					case QMARK:
+						if ("ATRV".equalsIgnoreCase(lastTxMsg))
+						{
+							atRvUnsupported = true;
+							responsePending = false;
+						}
 						// last command stays ignored
 					
 					case OK:
@@ -863,7 +992,9 @@ public class ElmProt
 						// if there is a pending data response, handle it now ...
 						if (responsePending)
 						{
-							result = handleDataMessage(lastRxMsg);
+							responsePending = false;
+							charsExpected = 0;
+							result = handleDataMessage(rxBeforePrompt);
 						}
 						
 						// queued commands will be sent first
@@ -873,6 +1004,20 @@ public class ElmProt
 						}
 						else
 						{
+							if (moduleScanInProgress)
+							{
+								if (advanceOrFinishAllModuleScan())
+								{
+									break;
+								}
+								moduleScanInProgress = false;
+								setStatus(STAT.CONNECTED);
+								if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
+								{
+									tCodes.put(0, new ObdCodeItem(0,
+											Messages.getString("no.trouble.codes.set")));
+								}
+							}
 							// all queued commands are sent -> we are done initializing
 							if (status == STAT.INITIALIZING)
 							{
@@ -901,6 +1046,39 @@ public class ElmProt
 								case OBD_SVC_DATA:
 								case OBD_SVC_FREEZEFRAME:
 								{
+									long nowMs = System.currentTimeMillis();
+									if (service == OBD_SVC_DATA
+											&& !runDemo
+											&& !atRvUnsupported
+											&& hasSupportedPids()
+											&& nowMs >= nextAtRvPollMs)
+									{
+										nextAtRvPollMs = nowMs + ATRV_POLL_INTERVAL_MS;
+										sendTelegram("ATRV".toCharArray());
+										break;
+									}
+									if (service == OBD_SVC_DATA
+											&& VehicleProfileManager.isCustomProfileActive()
+											&& hasSupportedPids())
+									{
+										List<String> pollSeq = VehicleProfileManager.nextInterleavedPollSequence(
+												nowMs,
+												true,
+												ecuAddresses,
+												selectedEcuAddress,
+												detectedJ1850Pwm || preferredProtocol == PROT.ELM_PROT_J1850PWM);
+										if (pollSeq.size() == 1)
+										{
+											sendTelegram(pollSeq.get(0).toCharArray());
+											break;
+										}
+										else if (!pollSeq.isEmpty())
+										{
+											pushOrderedCommands(pollSeq);
+											sendQueuedTelegram();
+											break;
+										}
+									}
 									// otherwise the next PID will be requested
 									writeTelegram(emptyBuffer, service, getNextSupportedPid());
 									// reduce OBD timeout towards minimum limit
@@ -918,13 +1096,24 @@ public class ElmProt
 			
 			// handle data response
 			default:
+				if ("ATRV".equalsIgnoreCase(lastTxMsg))
+				{
+					lastRxMsg = bufferStr;
+					responsePending = true;
+					return result;
+				}
 				// if we are still initializing check for address entries
 				switch (status)
 				{
 					case ECU_DETECT:
 					{
 						// start of 0100 response is end of address
-						int adrEnd = bufferStr.indexOf("41");
+						// Search "4100" first because SAE J1850 PWM headers begin with "416B..."
+						int adrEnd = bufferStr.indexOf("4100");
+						if (adrEnd < 0)
+						{
+							adrEnd = bufferStr.indexOf("41");
+						}
 						// if not a service response, check for possible NRC
 						if(adrEnd < 0)
 						{
@@ -949,14 +1138,19 @@ public class ElmProt
 								if (adrLen == 6)
 								{
 									/*
-									 * 6 char (3 byte) prefix -> ISO9141 address <FF><RR><SS>
-									 *     FF - Frame type
+									 * 6 char (3 byte) prefix -> ISO9141 / J1850 address <FF><RR><SS>
+									 *     FF - Frame type (0x41 = SAE J1850 PWM, 0x48 = ISO 9141-2)
 									 *     RR - receiver address
 									 *     SS - sender address
 									 */
+									String hdr = bufferStr.substring(adrStart, adrEnd).toUpperCase(Locale.US);
+									if (hdr.startsWith("416B") || hdr.startsWith("C4"))
+									{
+										detectedJ1850Pwm = true;
+									}
 									adrLen = 2;
 									adrStart = adrEnd - adrLen;
-									// subtract ISO checksum from payload
+									// subtract ISO/J1850 checksum from payload
 									dataEnd -= 2;
 								}
 								else if (adrLen == 10)
@@ -1053,7 +1247,8 @@ public class ElmProt
 						lastRxMsg = bufferStr;
 						charsExpected = 0;
 					}
-					else if (buffer[0] == '0')
+					else if (buffer[0] == '0'
+							&& !((charsExpected > 0 || responsePending) && !lastRxMsg.isEmpty()))
 					{
 						// first line of a multiline message
 						lastRxMsg = bufferStr.substring(idx + 1);
@@ -1094,6 +1289,7 @@ public class ElmProt
 				if (!responsePending)
 				{
 					result = handleDataMessage(lastRxMsg);
+					charsExpected = 0;
 				}
 		}
 		return (result);
@@ -1107,9 +1303,23 @@ public class ElmProt
 	 */
 	private int handleDataMessage(String lastRxMsg)
 	{
-		int result = 0;
-		
-		// otherwise process response
+		if ("ATRV".equalsIgnoreCase(lastTxMsg))
+		{
+			float volts = VirtualPidCalculator.parseAtRvVolts(lastRxMsg);
+			if (!Float.isNaN(volts))
+			{
+				virtualPids.publishAdapterVoltage(volts, PidPvs);
+			}
+			return 0;
+		}
+
+        if (currentScanningModule != null && lastRxMsg != null
+                && lastRxMsg.matches("(?i)(43|47|4A|53|58|59)[0-9A-F]*")) {
+            moduleResponseReceived = true;
+        }
+        int result = 0;
+
+        // otherwise process response
 		switch (service)
 		{
 			case OBD_SVC_CAN_MONITOR:
@@ -1122,6 +1332,427 @@ public class ElmProt
 		}
 		return result;
 	}
+
+	private boolean handleOptionalProfileFailure()
+	{
+		if ("ATRV".equalsIgnoreCase(lastTxMsg))
+		{
+			atRvUnsupported = true;
+			proceedAfterOptionalFailure();
+			return true;
+		}
+		if (VehicleProfileManager.isCustomProfileActive()
+				&& (moduleScanInProgress || VehicleProfileManager.isOptionalCommand(lastTxMsg)))
+		{
+			VehicleProfileManager.onOptionalCommandFailed(0, 0, lastTxMsg);
+			proceedAfterOptionalFailure();
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Continue draining queued commands or resume polling after an optional custom vehicle command
+	 * (Mode 21/22 PID probe or multi-module DTC request) returns NODATA / CANERROR / NOCONN.
+	 */
+	private void proceedAfterOptionalFailure()
+	{
+		if (!cmdStack.isEmpty())
+		{
+			sendQueuedTelegram();
+			return;
+		}
+		if (moduleScanInProgress)
+		{
+			if (advanceOrFinishAllModuleScan())
+			{
+				return;
+			}
+			moduleScanInProgress = false;
+			setStatus(STAT.CONNECTED);
+			if (service == OBD_SVC_READ_CODES && tCodes.isEmpty())
+			{
+				tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+			}
+			return;
+		}
+		if (service == OBD_SVC_DATA || service == OBD_SVC_FREEZEFRAME)
+		{
+			setStatus(STAT.CONNECTED);
+			writeTelegram(emptyBuffer, service, getNextSupportedPid());
+		}
+	}
+
+	/**
+	 * Push an ordered list of ELM327 commands onto LIFO cmdStack so they execute in forward order.
+	 */
+	private void pushOrderedCommands(List<String> orderedCmds)
+	{
+		if (orderedCmds == null || orderedCmds.isEmpty())
+		{
+			return;
+		}
+		for (int i = orderedCmds.size() - 1; i >= 0; i--)
+		{
+			pushTelegram(orderedCmds.get(i));
+		}
+	}
+
+	private List<String> buildStandardBusRestoreCommands()
+	{
+		List<String> cmds = new ArrayList<String>();
+		cmds.add("ATPC");
+		cmds.add("ATD");
+		cmds.add("ATE0");
+		cmds.add("ATL0");
+		cmds.add("ATS0");
+		cmds.add("ATH0");
+		String setProtCmd = createCommand(CMD.SETPROT, preferredProtocol.ordinal());
+		if (setProtCmd != null)
+		{
+			cmds.add(setProtCmd);
+		}
+		if (selectedEcuAddress >= 0x100)
+		{
+			String craCmd = createCommand(CMD.SETCANRXFLT, selectedEcuAddress);
+			if (craCmd != null)
+			{
+				cmds.add(craCmd);
+			}
+		}
+		else if (selectedEcuAddress > 0)
+		{
+			cmds.add(String.format(Locale.US, "ATSR%02X", Integer.valueOf(selectedEcuAddress)));
+		}
+		return cmds;
+	}
+
+	private final TelegramSink demoObdSink = new TelegramSink()
+	{
+		@Override
+		public void sendTelegram(char[] telegram)
+		{
+			ElmProt.super.handleTelegram(telegram);
+		}
+	};
+
+	/**
+	 * Scan fault codes on a specific vehicle ECU module for the currently active brand profile.
+	 */
+	public synchronized void scanVehicleModuleDtcs(VehicleModule module)
+	{
+		pendingAllModuleQueue.clear();
+		currentScanningModule = null;
+		startSingleModuleScanLocked(module, false);
+	}
+
+	private void startSingleModuleScanLocked(VehicleModule module, boolean partOfAllModuleSweep)
+	{
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			return;
+		}
+		handler.setActiveModule(module);
+		VehicleModule target = handler.getActiveModule();
+        moduleResponseReceived = false;
+		demoCodesCleared = false;
+		this.service = OBD_SVC_READ_CODES;
+		cmdStack.clear();
+		prepareModuleScanReset();
+
+		if (runDemo)
+		{
+			handler.emitDemoDtcs(target, demoObdSink);
+			return;
+		}
+
+		if (target == null || target.isEngineObd())
+		{
+			moduleScanInProgress = partOfAllModuleSweep;
+			List<String> seq = new ArrayList<String>();
+			if (customModuleBusActive)
+			{
+				seq.addAll(buildStandardBusRestoreCommands());
+				customModuleBusActive = false;
+			}
+			seq.add("0101");
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_READ_CODES)));
+			seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PENDINGCODES)));
+			if (handler.supportsPermanentDtcMode0A())
+			{
+				seq.add(String.format(Locale.US, "%02X", Integer.valueOf(OBD_SVC_PERMACODES)));
+			}
+			pushOrderedCommands(seq);
+			sendQueuedTelegram();
+		}
+		else
+		{
+			List<String> cmds = handler.buildModuleReadCommands(target);
+			if (!cmds.isEmpty())
+			{
+				customModuleBusActive = true;
+				moduleScanInProgress = true;
+				pushOrderedCommands(cmds);
+				sendQueuedTelegram();
+			}
+			else if (partOfAllModuleSweep)
+			{
+				moduleScanInProgress = true;
+				advanceOrFinishAllModuleScan();
+			}
+		}
+	}
+
+	/**
+	 * Sequentially scan ALL diagnostic ECU modules supported by the active vehicle profile
+	 * and aggregate their fault codes into {@code tCodes} and {@link #getLastAllModuleScanResults()}.
+	 */
+	public synchronized boolean scanAllVehicleModules()
+	{
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			return false;
+		}
+		List<VehicleModule> modules = handler.getAvailableModules();
+		if (modules == null || modules.isEmpty())
+		{
+			return false;
+		}
+
+		pendingAllModuleQueue.clear();
+		completedModuleEntries.clear();
+		pendingAllModuleQueue.addAll(modules);
+		allModuleTotalCount = modules.size();
+		demoCodesCleared = false;
+		this.service = OBD_SVC_READ_CODES;
+
+		if (runDemo)
+		{
+			for (VehicleModule mod : modules)
+			{
+				handler.setActiveModule(mod);
+				prepareModuleScanReset();
+				handler.emitDemoDtcs(mod, demoObdSink);
+				completedModuleEntries.add(new ModuleScanEntry(mod, snapshotRealFaultCodesLocked(handler, mod), true));
+			}
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
+			moduleScanInProgress = false;
+			finalizeAllModuleResultsLocked(handler);
+			firePropertyChange(new PropertyChangeEvent(
+					this, PROP_MODULE_SCAN_PROGRESS, null,
+					new int[]{allModuleTotalCount, allModuleTotalCount}));
+			return true;
+		}
+
+		VehicleModule firstMod = pendingAllModuleQueue.remove(0);
+		currentScanningModule = firstMod;
+		firePropertyChange(new PropertyChangeEvent(
+				this, PROP_MODULE_SCAN_PROGRESS, null,
+				new int[]{0, allModuleTotalCount}));
+		startSingleModuleScanLocked(firstMod, true);
+		return true;
+	}
+
+	public synchronized boolean isAllModuleScanInProgress()
+	{
+		return currentScanningModule != null;
+	}
+
+	public synchronized VehicleModule getCurrentScanningModule()
+	{
+		return currentScanningModule;
+	}
+
+	public synchronized List<ModuleScanEntry> getLastAllModuleScanResults()
+	{
+		return Collections.unmodifiableList(
+				new ArrayList<ModuleScanEntry>(completedModuleEntries));
+	}
+
+	public synchronized void cancelAllModuleScan()
+	{
+		pendingAllModuleQueue.clear();
+		currentScanningModule = null;
+		moduleScanInProgress = false;
+		cmdStack.clear();
+        this.service = OBD_SVC_NONE;
+		if (customModuleBusActive && !runDemo)
+		{
+			customModuleBusActive = false;
+			pushOrderedCommands(buildStandardBusRestoreCommands());
+			sendQueuedTelegram();
+		}
+	}
+
+	private boolean advanceOrFinishAllModuleScan()
+	{
+		if (currentScanningModule == null)
+		{
+			return false;
+		}
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
+			moduleScanInProgress = false;
+			return false;
+		}
+
+		completedModuleEntries.add(new ModuleScanEntry(
+				currentScanningModule, snapshotRealFaultCodesLocked(handler, currentScanningModule), moduleResponseReceived));
+		int doneCount = completedModuleEntries.size();
+
+		if (!pendingAllModuleQueue.isEmpty())
+		{
+			VehicleModule nextMod = pendingAllModuleQueue.remove(0);
+			currentScanningModule = nextMod;
+			firePropertyChange(new PropertyChangeEvent(
+					this, PROP_MODULE_SCAN_PROGRESS, null,
+					new int[]{doneCount, allModuleTotalCount}));
+			startSingleModuleScanLocked(nextMod, true);
+			return true;
+		}
+
+		currentScanningModule = null;
+		moduleScanInProgress = false;
+		finalizeAllModuleResultsLocked(handler);
+		setStatus(STAT.CONNECTED);
+		if (customModuleBusActive && !runDemo)
+		{
+			customModuleBusActive = false;
+			pushOrderedCommands(buildStandardBusRestoreCommands());
+			sendQueuedTelegram();
+		}
+		firePropertyChange(new PropertyChangeEvent(
+				this, PROP_MODULE_SCAN_PROGRESS, null,
+				new int[]{allModuleTotalCount, allModuleTotalCount}));
+		return true;
+	}
+
+	private List<EcuCodeItem> snapshotRealFaultCodesLocked(VehicleProfileHandler handler, VehicleModule mod)
+	{
+		List<EcuCodeItem> out = new ArrayList<EcuCodeItem>();
+		String tagPrefix = "[" + mod.getShortTag() + "] ";
+		for (Object raw : tCodes.values())
+		{
+			if (!(raw instanceof EcuCodeItem)) continue;
+			EcuCodeItem ci = (EcuCodeItem) raw;
+			String codeStr = String.valueOf(ci.get(EcuCodeItem.FID_CODE));
+			if (codeStr == null || codeStr.isEmpty()
+					|| "P0000".equalsIgnoreCase(codeStr)
+					|| "0000".equalsIgnoreCase(codeStr))
+			{
+				continue;
+			}
+			if (handler != null && handler.isSystemPassCode(codeStr))
+			{
+				continue;
+			}
+			String desc = String.valueOf(ci.get(EcuCodeItem.FID_DESCRIPT));
+			if (!desc.startsWith("["))
+			{
+				desc = tagPrefix + desc;
+			}
+			EcuCodeItem copy = new ObdCodeItem(0, desc);
+			copy.put(EcuCodeItem.FID_CODE, codeStr);
+			Object statusObj = ci.get(EcuCodeItem.FID_STATUS);
+			if (statusObj != null)
+			{
+				copy.put(EcuCodeItem.FID_STATUS, statusObj);
+			}
+			out.add(copy);
+		}
+		return out;
+	}
+
+	private void finalizeAllModuleResultsLocked(VehicleProfileHandler handler)
+	{
+		List<VehicleModule> avail = handler.getAvailableModules();
+		if (avail != null && !avail.isEmpty())
+		{
+			handler.setActiveModule(avail.get(0));
+		}
+		tCodes.clear();
+		for (int mIdx = 0; mIdx < completedModuleEntries.size(); mIdx++)
+		{
+			ModuleScanEntry entry = completedModuleEntries.get(mIdx);
+			for (int cIdx = 0; cIdx < entry.faultCodes.size(); cIdx++)
+			{
+				int syntheticKey = ((mIdx + 1) << 16) | (cIdx + 1);
+				tCodes.put(Integer.valueOf(syntheticKey), entry.faultCodes.get(cIdx));
+			}
+		}
+        // Do not reinterpret aggregate OEM codes as the Mode 01 MIL/count byte.
+		if (tCodes.isEmpty())
+		{
+			tCodes.put(Integer.valueOf(0),
+					new ObdCodeItem(0, Messages.getString("module_scan_review")));
+		}
+	}
+
+	/**
+	 * Clear fault codes on a specific vehicle ECU module and re-scan to confirm.
+	 */
+	public synchronized void clearVehicleModuleDtcs(VehicleModule module)
+	{
+		VehicleProfileHandler handler = VehicleProfileManager.getActiveHandler();
+		if (handler == null)
+		{
+			return;
+		}
+		handler.setActiveModule(module);
+		VehicleModule target = handler.getActiveModule();
+        moduleResponseReceived = false;
+		cmdStack.clear();
+		prepareModuleScanReset();
+
+		if (runDemo)
+		{
+			demoCodesCleared = true;
+			tCodes.put(0, new ObdCodeItem(0, Messages.getString("no.trouble.codes.set")));
+			return;
+		}
+
+		if (target == null || target.isEngineObd())
+		{
+			moduleScanInProgress = false;
+			List<String> seq = new ArrayList<String>();
+			if (customModuleBusActive)
+			{
+				seq.addAll(buildStandardBusRestoreCommands());
+				customModuleBusActive = false;
+			}
+			seq.add("04");
+			seq.add("0101");
+			seq.add("03");
+			seq.add("07");
+			if (handler.supportsPermanentDtcMode0A())
+			{
+				seq.add("0A");
+			}
+			this.service = OBD_SVC_READ_CODES;
+			pushOrderedCommands(seq);
+			sendQueuedTelegram();
+		}
+		else
+		{
+			List<String> seq = new ArrayList<String>();
+			seq.addAll(handler.buildModuleClearCommands(target));
+			seq.addAll(handler.buildModuleReadCommands(target));
+			if (!seq.isEmpty())
+			{
+				this.service = OBD_SVC_READ_CODES;
+				customModuleBusActive = true;
+				moduleScanInProgress = true;
+				pushOrderedCommands(seq);
+				sendQueuedTelegram();
+			}
+		}
+	}
 	
 	// switch to exit the demo thread
 	public static boolean runDemo;
@@ -1132,8 +1763,10 @@ public class ElmProt
 	public void run()
 	{
 		int value = 0;
+		int demoTick = 0;
 		Integer pid;
 		runDemo = true;
+		demoCodesCleared = false;
 		
 		log.info("ELM DEMO thread started");
 		while (runDemo)
@@ -1146,24 +1779,46 @@ public class ElmProt
 				
 				setStatus(STAT.ECU_DETECT);
 				handleTelegram("SEARCHING...".toCharArray());
-				handleTelegram("7EA074100000000".toCharArray());
-				handleTelegram("486B104100BF9FA8919B".toCharArray());
-				handleTelegram("...486B104100BF9FA8919B".toCharArray());
-				handleTelegram("7E8064100000000".toCharArray());
-				handleTelegram("7E9074100000000".toCharArray());
-				handleTelegram("7EA074100000000".toCharArray());
-				// test case for issue AndrOBD/#60
-				handleTelegram("18DAF110064100BE3EB811".toCharArray());
+				VehicleProfileHandler activeDemoHandler = VehicleProfileManager.getActiveHandler();
+				if (activeDemoHandler != null)
+				{
+					for (String detectFrame : activeDemoHandler.getDemoEcuDetectTelegrams())
+					{
+						handleTelegram(detectFrame.toCharArray());
+					}
+				}
+				else
+				{
+					handleTelegram("7EA074100000000".toCharArray());
+					handleTelegram("486B104100BF9FA8919B".toCharArray());
+					handleTelegram("...486B104100BF9FA8919B".toCharArray());
+					handleTelegram("7E8064100000000".toCharArray());
+					handleTelegram("7E9074100000000".toCharArray());
+					handleTelegram("7EA074100000000".toCharArray());
+					// test case for issue AndrOBD/#60
+					handleTelegram("18DAF110064100BE3EB811".toCharArray());
+				}
 				setStatus(STAT.ECU_DETECTED);
 				
 				while (runDemo)
 				{
+					VehicleProfileHandler currentHandler = VehicleProfileManager.getActiveHandler();
 					switch (service)
 					{
 						// read any kinds of trouble codes
 						case OBD_SVC_READ_CODES:
 						case OBD_SVC_PENDINGCODES:
 						case OBD_SVC_PERMACODES:
+							if (currentHandler != null)
+							{
+								if (!demoCodesCleared && tCodes.isEmpty())
+								{
+									currentHandler.emitDemoDtcs(
+											currentHandler.getActiveModule(), demoObdSink);
+								}
+								Thread.sleep(500);
+								break;
+							}
 							// simulate 12 TCs set as multy line response
 							// number of codes = 12 + MIL ON
 							handleTelegram("41018C000000".toCharArray());
@@ -1200,6 +1855,19 @@ public class ElmProt
 									service == OBD_SVC_DATA ? "4%X%02X%02X%02X%02X%02X"
 									                        : "4%X%02X00%02X%02X%02X%02X",
 									service, pid, value, value, value, value).toCharArray());
+								if (service == OBD_SVC_DATA && (demoTick % 16 == 0))
+								{
+									float demoVolts = 14.10f + 0.15f * (float) Math.sin(demoTick / 16.0);
+									virtualPids.publishAdapterVoltage(demoVolts, PidPvs);
+								}
+								if (service == OBD_SVC_DATA
+										&& currentHandler != null
+										&& (demoTick % 8 == 0))
+								{
+									currentHandler.emitDemoLiveData(
+											demoTick / 8, demoCodesCleared, PidPvs, demoObdSink);
+								}
+								demoTick++;
 							}
 							else
 							{
@@ -1227,11 +1895,21 @@ public class ElmProt
 								handleTelegram("490054000000".toCharArray());
 							}
 							
-							// send VIN "0123456789ABCDEFG"
-							handleTelegram("014".toCharArray());
-							handleTelegram("1:49020130313233".toCharArray());
-							handleTelegram("2:343536373839".toCharArray());
-							handleTelegram("3:41424344454647".toCharArray());
+							if (currentHandler != null)
+							{
+								for (String vinFrame : currentHandler.getDemoVinTelegrams())
+								{
+									handleTelegram(vinFrame.toCharArray());
+								}
+							}
+							else
+							{
+								// send VIN "0123456789ABCDEFG"
+								handleTelegram("014".toCharArray());
+								handleTelegram("1:49020130313233".toCharArray());
+								handleTelegram("2:343536373839".toCharArray());
+								handleTelegram("3:41424344454647".toCharArray());
+							}
 							
 							// send 2 CAL-IDs "GSPA..." without length id
 							handleTelegram("0:490402475350".toCharArray());
@@ -1301,6 +1979,65 @@ public class ElmProt
 		{
 			log.info("OBD Service: " + this.service + "->" + service);
 			this.service = service;
+			pendingAllModuleQueue.clear();
+			currentScanningModule = null;
+			moduleScanInProgress = false;
+
+			// If we previously targeted a custom ECU module (CCM / ABS / TCM / MDPS / etc.)
+			// and are now switching back to standard OBD services (Live Data, Freeze Frame, Veh Info),
+			// restore default ELM327 headers & protocol before starting the service!
+			VehicleModule activeMod = VehicleProfileManager.getActiveModule();
+			boolean nonEngineModSelected = (activeMod != null && !activeMod.isEngineObd());
+			if (customModuleBusActive && service != OBD_SVC_NONE && service != OBD_SVC_CAN_MONITOR)
+			{
+				boolean stayOnCustomModule = (service == OBD_SVC_READ_CODES) && nonEngineModSelected;
+				if (!stayOnCustomModule)
+				{
+					customModuleBusActive = false;
+					cmdStack.clear();
+					if (clearLists)
+					{
+						clearDataLists(service);
+					}
+					List<String> seq = new ArrayList<String>(buildStandardBusRestoreCommands());
+					if (service == OBD_SVC_DATA
+							|| service == OBD_SVC_FREEZEFRAME
+							|| service == OBD_SVC_VEH_INFO
+							|| service == OBD_SVC_CTRL_MODE)
+					{
+						seq.add(String.format(Locale.US, "%02X00", Integer.valueOf(service)));
+					}
+					else if (service == OBD_SVC_READ_CODES)
+					{
+						seq.add("0101");
+						seq.add("03");
+						seq.add("07");
+					}
+					else if (service == OBD_SVC_CLEAR_CODES)
+					{
+						seq.add("04");
+					}
+					pushOrderedCommands(seq);
+					sendQueuedTelegram();
+					return;
+				}
+			}
+
+			// If a custom brand profile is active and a non-engine module is selected on Fault Codes,
+			// delegate OBD_SVC_READ_CODES / OBD_SVC_CLEAR_CODES to the active vehicle module scanner.
+			if (clearLists && nonEngineModSelected)
+			{
+				if (service == OBD_SVC_READ_CODES)
+				{
+					scanVehicleModuleDtcs(activeMod);
+					return;
+				}
+				if (service == OBD_SVC_CLEAR_CODES)
+				{
+					clearVehicleModuleDtcs(activeMod);
+					return;
+				}
+			}
 			
 			// send corresponding command(s)
 			switch (service)

@@ -49,8 +49,11 @@ import androidx.preference.PreferenceScreen;
 import java.util.Locale;
 
 import com.fr3ts0n.ecu.EcuDataItem;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
+import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiRegistry;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 
 import java.util.HashSet;
 import java.util.Vector;
@@ -71,6 +74,7 @@ public class SettingsActivity extends AppCompatActivity
 	static final String KEY_DATA_ITEMS = "data_items";
 	static final String KEY_PROT_SELECT = "protocol";
 	static final String KEY_COMM_MEDIUM = "comm_medium";
+	static final String KEY_VEHICLE_PROFILE = VehicleProfileManager.PREF_KEY_VEHICLE_PROFILE;
 	static final String ELM_MIN_TIMEOUT = "elm_min_timeout";
 	static final String ELM_CMD_DISABLE = "elm_cmd_disable";
 	private static final String KEY_APP_LANGUAGE = "app_language";
@@ -100,6 +104,7 @@ public class SettingsActivity extends AppCompatActivity
 			activity.createConfigurationContext(config);
 		}
 		resources.updateConfiguration(config, resources.getDisplayMetrics());
+		VehicleProfileManager.refreshLabels();
 	}
 
 	@Override
@@ -108,6 +113,15 @@ public class SettingsActivity extends AppCompatActivity
 		// Apply locale before calling super.onCreate()
 		applyLocale(this);
 		super.onCreate(savedInstanceState);
+		ModernUiUtils.applyEdgeToEdgeInsets(this);
+		ModernUiUtils.enableActionBarUp(this);
+
+		getSupportFragmentManager().addOnBackStackChangedListener(() -> {
+			if (getSupportFragmentManager().getBackStackEntryCount() == 0)
+			{
+				setTitle(R.string.settings);
+			}
+		});
 
 		if (savedInstanceState == null)
 		{
@@ -116,6 +130,18 @@ public class SettingsActivity extends AppCompatActivity
 				.replace(android.R.id.content, new SettingsFragment())
 				.commit();
 		}
+	}
+
+	@Override
+	public boolean onSupportNavigateUp()
+	{
+		if (getSupportFragmentManager().getBackStackEntryCount() > 0)
+		{
+			getSupportFragmentManager().popBackStack();
+			return true;
+		}
+		finish();
+		return true;
 	}
 
 	/**
@@ -131,6 +157,11 @@ public class SettingsActivity extends AppCompatActivity
 		Bundle args = new Bundle();
 		args.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT, pref.getKey());
 		fragment.setArguments(args);
+
+		if (pref.getTitle() != null)
+		{
+			setTitle(pref.getTitle());
+		}
 
 		getSupportFragmentManager()
 			.beginTransaction()
@@ -201,6 +232,8 @@ public class SettingsActivity extends AppCompatActivity
 				setPrefsText(key);
 			}
 
+			// set up vehicle profile selection
+			setupVehicleProfileSelection();
 			// set up communication media selection
 			setupCommMediaSelection();
 			// set up protocol selection
@@ -235,47 +268,8 @@ public class SettingsActivity extends AppCompatActivity
 		public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState)
 		{
 			super.onViewCreated(view, savedInstanceState);
-			view.post(() -> fixUnpaddedListContainer(view));
-		}
-
-		private void fixUnpaddedListContainer(@NonNull View fragmentView)
-		{
-			View listContainer = fragmentView.findViewById(android.R.id.list_container);
-			if (listContainer == null) return;
-
-			int statusBarHeight = 0;
-			WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(fragmentView);
-			if (insets != null)
-			{
-				statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
-			}
-
-			int actionBarHeight = 0;
-			if (requireActivity() instanceof AppCompatActivity)
-			{
-				ActionBar actionBar = ((AppCompatActivity) requireActivity()).getSupportActionBar();
-				if (actionBar != null)
-				{
-					actionBarHeight = actionBar.getHeight();
-				}
-			}
-			int expectedTop = statusBarHeight + actionBarHeight;
-
-			int[] screenLocation = new int[2];
-			listContainer.getLocationOnScreen(screenLocation);
-			int actualTop = screenLocation[1];
-
-			// Comfortably below "unpadded" (0) but still well short of the correct offset -
-			// avoids both a false negative from minor measurement variance and a false
-			// positive that would double-pad an already-correct layout.
-			if (actualTop < statusBarHeight)
-			{
-				listContainer.setPadding(
-					listContainer.getPaddingLeft(),
-					listContainer.getPaddingTop() + (expectedTop - actualTop),
-					listContainer.getPaddingRight(),
-					listContainer.getPaddingBottom());
-			}
+			view.setBackgroundColor(androidx.core.content.ContextCompat.getColor(
+				requireContext(), R.color.bg_screen));
 		}
 
 		/**
@@ -400,28 +394,53 @@ public class SettingsActivity extends AppCompatActivity
 		}
 
 		/**
-		 * set up protocol selection
+		 * set up real communication adapter selection (Demo mode is a separate button, not an adapter)
 		 */
 		void setupCommMediaSelection()
 		{
 			ListPreference pref = (ListPreference) findPreference(KEY_COMM_MEDIUM);
 			if (pref == null) return;
-			CommService.MEDIUM[] values = CommService.MEDIUM.values();
-			CharSequence[] titles = new CharSequence[values.length];
-			CharSequence[] keys = new CharSequence[values.length];
-			int i = 0;
-			for (CommService.MEDIUM proto : values)
+
+			// Migrate legacy "0" (DEMO) preference to "1" (BLUETOOTH)
+			CommService.MEDIUM currentMedium = MainActivity.resolveRealMedium(prefs);
+
+			CommService.MEDIUM[] realMedia = new CommService.MEDIUM[] {
+				CommService.MEDIUM.BLUETOOTH,
+				CommService.MEDIUM.BLE,
+				CommService.MEDIUM.USB,
+				CommService.MEDIUM.NETWORK
+			};
+			CharSequence[] titles = new CharSequence[] {
+				getString(R.string.medium_bt),
+				getString(R.string.medium_ble),
+				getString(R.string.medium_usb),
+				getString(R.string.medium_wifi)
+			};
+			CharSequence[] keys = new CharSequence[realMedia.length];
+			for (int i = 0; i < realMedia.length; i++)
 			{
-				titles[i] = proto.toString();
-				keys[i] = String.valueOf(proto.ordinal());
-				i++;
+				keys[i] = String.valueOf(realMedia[i].ordinal());
 			}
-			// set enries and keys
 			pref.setEntries(titles);
 			pref.setEntryValues(keys);
-			pref.setDefaultValue(titles[0]);
-			// show current selection
+			pref.setDefaultValue(String.valueOf(CommService.MEDIUM.BLUETOOTH.ordinal()));
+			pref.setValue(String.valueOf(currentMedium.ordinal()));
 			pref.setSummary(pref.getEntry());
+		}
+
+		void setupVehicleProfileSelection()
+		{
+			ListPreference pref = (ListPreference) findPreference(KEY_VEHICLE_PROFILE);
+			if (pref == null) return;
+			if (pref.getValue() == null || pref.getValue().isEmpty())
+			{
+				pref.setValue("standard");
+			}
+			CharSequence entry = pref.getEntry();
+			if (entry != null)
+			{
+				pref.setSummary(entry);
+			}
 		}
 
 		/**
@@ -434,7 +453,11 @@ public class SettingsActivity extends AppCompatActivity
 			if (itemList == null) return;
 
 			// collect data items for selection
-			items = ObdProt.dataItems.getSvcDataItems(ObdProt.OBD_SVC_DATA);
+			items = new Vector<EcuDataItem>(ObdProt.dataItems.getSvcDataItems(ObdProt.OBD_SVC_DATA));
+			if (VehicleProfileManager.isCustomProfileActive())
+			{
+				items.addAll(VehicleProfileManager.getExtendedDataItems());
+			}
 			HashSet<String> selections = new HashSet<>();
 			CharSequence[] titles = new CharSequence[items.size()];
 			CharSequence[] keys = new CharSequence[items.size()];
@@ -451,10 +474,29 @@ public class SettingsActivity extends AppCompatActivity
 			itemList.setEntries(titles);
 			itemList.setEntryValues(keys);
 
+			VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
+			String seedKey = activeUi != null ? activeUi.getSettingsSeedPrefKey() : null;
+
 			// if there is no item selected, mark all as selected
 			if (itemList.getValues().size() == 0)
 			{
 				itemList.setValues(selections);
+				if (seedKey != null)
+				{
+					prefs.edit().putBoolean(seedKey, true).apply();
+				}
+			}
+			else if (seedKey != null && !prefs.getBoolean(seedKey, false))
+			{
+				// Seed brand extended items once into an existing selection set so they start checked
+				// while still allowing the user to uncheck individual items afterward.
+				HashSet<String> merged = new HashSet<String>(itemList.getValues());
+				for (EcuDataItem extItem : VehicleProfileManager.getExtendedDataItems())
+				{
+					merged.add(extItem.toString());
+				}
+				itemList.setValues(merged);
+				prefs.edit().putBoolean(seedKey, true).apply();
 			}
 		}
 
@@ -566,9 +608,21 @@ public class SettingsActivity extends AppCompatActivity
 				}
 				else
 				{
-					// OPEN intents require result handling
-					intent.addCategory(Intent.CATEGORY_OPENABLE);
-					startActivityForResult(intent, preference.hashCode());
+					// OPEN intents require a 16-bit requestCode (0..65535) in AndroidX Fragment
+					int reqCode = -1;
+					for (int idx = 0; idx < extKeys.length; idx++)
+					{
+						if (extKeys[idx].equals(preference.getKey()))
+						{
+							reqCode = 100 + idx;
+							break;
+						}
+					}
+					if (reqCode >= 0 && intent != null)
+					{
+						intent.addCategory(Intent.CATEGORY_OPENABLE);
+						startActivityForResult(intent, reqCode);
+					}
 				}
 			}
 			catch(Exception e)
@@ -585,21 +639,25 @@ public class SettingsActivity extends AppCompatActivity
 		@Override
 		public void onActivityResult(int requestCode, int resultCode, Intent data)
 		{
-			Preference pref;
-			SharedPreferences.Editor ed = prefs.edit();
-			String value = (resultCode == Activity.RESULT_OK) ? String.valueOf(data.getData()) : null;
-			// find the right key
-			for (String key : extKeys)
+			super.onActivityResult(requestCode, resultCode, data);
+			int extIdx = requestCode - 100;
+			if (extIdx < 0 || extIdx >= extKeys.length)
 			{
-				pref = findPreference(key);
-				if (pref.hashCode() == requestCode)
-				{
-					ed.putString(key, value);
-					pref.setSummary(value != null ? value : getString(R.string.select_extension));
-				}
+				return;
 			}
-
-			ed.apply();
+			if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null)
+			{
+				// User canceled picker -> preserve previously configured extension file
+				return;
+			}
+			String key = extKeys[extIdx];
+			String value = String.valueOf(data.getData());
+			prefs.edit().putString(key, value).apply();
+			Preference pref = findPreference(key);
+			if (pref != null)
+			{
+				pref.setSummary(value);
+			}
 		}
 
 		@Override
@@ -622,12 +680,23 @@ public class SettingsActivity extends AppCompatActivity
 			if(KEY_COMM_MEDIUM.equals(key))
 				updateNetworkSelections();
 
+			if(KEY_VEHICLE_PROFILE.equals(key))
+			{
+				String profVal = sharedPreferences.getString(KEY_VEHICLE_PROFILE, "standard");
+				VehicleProfileManager.setProfileByKey(profVal, ObdProt.PidPvs);
+				setupPidSelection();
+			}
+
 			if(ELM_TIMING_SELECT.equals(key))
-				//noinspection ConstantConditions
-				findPreference(ELM_MIN_TIMEOUT)
-					.setEnabled(ElmProt.AdaptTimingMode.SOFTWARE.toString()
-						          .equals(((ListPreference)pref).getValue())
-					           );
+			{
+				Preference minTimeoutPref = findPreference(ELM_MIN_TIMEOUT);
+				if (minTimeoutPref != null && pref instanceof ListPreference)
+				{
+					minTimeoutPref.setEnabled(
+						ElmProt.AdaptTimingMode.SOFTWARE.toString()
+							.equals(((ListPreference) pref).getValue()));
+				}
+			}
 
 			if(KEY_APP_LANGUAGE.equals(key))
 			{

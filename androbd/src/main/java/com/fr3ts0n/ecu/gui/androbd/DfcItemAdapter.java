@@ -19,23 +19,25 @@
 package com.fr3ts0n.ecu.gui.androbd;
 
 import android.content.Context;
+import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
 
 import com.fr3ts0n.ecu.EcuCodeItem;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleProfileManager;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
 
 import java.util.Collection;
-import java.util.Objects;
 
 /**
- * Adapter to display OBD DFCs
- *
- * @author erwin
+ * Adapter to display OBD Diagnostic Fault Codes (DTC/DFC) in strict card layout.
  */
 public class DfcItemAdapter extends ObdItemAdapter
 {
@@ -50,13 +52,9 @@ public class DfcItemAdapter extends ObdItemAdapter
 		return pvs.values();
 	}
 
-	/* (non-Javadoc)
-	 * @see com.fr3ts0n.ecu.gui.androbd.ObdItemAdapter#getView(int, android.view.View, android.view.ViewGroup)
-	 */
 	@Override
 	public View getView(int position, View v, ViewGroup parent)
 	{
-		// get data PV
 		IndexedProcessVar currPv = (IndexedProcessVar) getItem(position);
 
 		if (v == null)
@@ -64,40 +62,102 @@ public class DfcItemAdapter extends ObdItemAdapter
 			v = mInflater.inflate(R.layout.obd_item, parent, false);
 		}
 
-		// Show icon
+		if (currPv == null)
+		{
+			return v;
+		}
+
+		View itemAccent = v.findViewById(R.id.item_accent);
 		ImageView ivIcon = v.findViewById(R.id.obd_icon);
+		TextView tvDescr = v.findViewById(R.id.obd_label);
+		TextView tvValueWide = v.findViewById(R.id.obd_value_wide);
+		TextView tvSublabel = v.findViewById(R.id.obd_sublabel);
+		View valueColumn = v.findViewById(R.id.value_column);
+		TextView tvValue = v.findViewById(R.id.obd_value);
+		TextView tvUnits = v.findViewById(R.id.obd_units);
+		ImageView ivFavStar = v.findViewById(R.id.iv_fav_star);
+		ProgressBar bar = v.findViewById(R.id.bar);
+
+		if (bar != null) bar.setVisibility(View.GONE);
+		if (tvValueWide != null) tvValueWide.setVisibility(View.GONE);
+		if (ivFavStar != null) ivFavStar.setVisibility(View.GONE);
+		if (valueColumn != null) valueColumn.setVisibility(View.VISIBLE);
+
+		int accentColor = ContextCompat.getColor(getContext(), R.color.status_danger);
+		int statusRes = R.string.dtc_status_confirmed;
 		ivIcon.setImageResource(R.drawable.ic_code);
+
+		String codeText = String.valueOf(currPv.get(EcuCodeItem.FID_CODE));
+
 		try
 		{
-			// Show icon based on code status (pending/permanent/normal)
-			Integer svc = (Integer)currPv.get(EcuCodeItem.FID_STATUS);
-			switch(svc)
+			Integer svc = (Integer) currPv.get(EcuCodeItem.FID_STATUS);
+			if (svc != null)
 			{
-				case ObdProt.OBD_SVC_PENDINGCODES:
+				if (svc == ObdProt.OBD_SVC_PENDINGCODES)
+				{
 					ivIcon.setImageResource(R.drawable.ic_history);
-					break;
-
-				case ObdProt.OBD_SVC_PERMACODES:
-					ivIcon.setImageResource(android.R.drawable.ic_dialog_alert);
-					break;
+					accentColor = ContextCompat.getColor(getContext(), R.color.status_demo);
+					statusRes = R.string.dtc_status_pending;
+				} else if (svc == ObdProt.OBD_SVC_PERMACODES)
+				{
+					ivIcon.setImageResource(R.drawable.ic_notification);
+					statusRes = R.string.dtc_status_permanent;
+				}
 			}
+		} catch (Exception ignored)
+		{
 		}
-		catch(Exception ex) { /* ignore */ }
 
+		if (VehicleProfileManager.isSystemPassCode(codeText))
+		{
+			ivIcon.setImageResource(R.drawable.ic_info);
+			accentColor = ContextCompat.getColor(getContext(), R.color.status_online);
+			statusRes = R.string.dtc_status_pass;
+		} else if (VehicleProfileManager.isReadinessInfoCode(codeText))
+		{
+			ivIcon.setImageResource(R.drawable.ic_info);
+			accentColor = ContextCompat.getColor(getContext(), R.color.status_demo);
+			statusRes = R.string.dtc_status_readiness;
+		}
+
+		tintViewBackground(itemAccent, accentColor);
+		ivIcon.setColorFilter(accentColor);
 		ivIcon.setVisibility(View.VISIBLE);
 
-		TextView tvDescr = v.findViewById(R.id.obd_label);
-		TextView tvValue = v.findViewById(R.id.obd_units);
+		String guidance = VehicleProfileManager.getDtcGuidance(codeText);
+		String description = String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT));
+		tvDescr.setMaxLines(Integer.MAX_VALUE);
+		tvDescr.setEllipsize(null);
+		tvDescr.setText(guidance.isEmpty() ? description : description + "\n\n" + guidance);
+		if (tvSublabel != null)
+		{
+			Object modObj = VehicleProfileManager.isCustomProfileActive()
+					? currPv.get(VehicleProfileManager.CODE_FIELD_MODULE)
+					: null;
+			String hint = getContext().getString(VehicleProfileManager.isBrandActive("jaguar")
+                    ? R.string.jag_manual_dtc_hint : R.string.long_press_dfc_hint);
+			if (modObj != null && !String.valueOf(modObj).trim().isEmpty())
+			{
+				tvSublabel.setText("[" + String.valueOf(modObj).trim() + "] · " + hint);
+			} else
+			{
+				tvSublabel.setText(hint);
+			}
+			tvSublabel.setVisibility(View.VISIBLE);
+		}
 
-		tvValue.setText(String.valueOf(Objects.requireNonNull(currPv).get(EcuCodeItem.FID_CODE)));
-		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
+		tvValue.setVisibility(View.VISIBLE);
+		tvValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+		tvValue.setTextColor(accentColor);
+		tvValue.setText(codeText);
+
+		tvUnits.setVisibility(View.VISIBLE);
+		tvUnits.setText(statusRes);
 
 		return v;
 	}
 
-	/* (non-Javadoc)
-	 * @see com.fr3ts0n.ecu.gui.androbd.ObdItemAdapter#getView(int, android.view.View, android.view.ViewGroup)
-	 */
 	@Override
 	public View getDropDownView(int position, View v, ViewGroup parent)
 	{

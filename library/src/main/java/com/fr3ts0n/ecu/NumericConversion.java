@@ -33,7 +33,7 @@ public abstract class NumericConversion implements Conversion
 	static final Logger log = Logger.getLogger("data.ecu");
 
 	/** physical units of data item */
-	String units = "";
+	protected String units = "";
 
 	@Override
 	public String physToPhysFmtString(Number physVal, String format)
@@ -41,7 +41,7 @@ public abstract class NumericConversion implements Conversion
 		return String.format(format, physVal);
 	}
 
-	NumericConversion()
+	protected NumericConversion()
 	{
 	}
 

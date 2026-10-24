@@ -19,6 +19,19 @@
     public <init>();
 }
 
+# EcuDataPv instances also serialize their Conversion[] array (FID_CNVID),
+# including LinearConversion, HashConversion, BitmapConversion, and Jaguar
+# Mode 22 NumericConversion subclasses. Keep Conversion implementations and
+# their fields/constructors intact for ObjectOutputStream/ObjectInputStream.
+-keep class com.fr3ts0n.ecu.Conversion { *; }
+-keep class * implements com.fr3ts0n.ecu.Conversion { *; }
+
+# Keep resource directory paths used by UTF8Bundle / Messages / EcuCodeList /
+# EcuDataItems when loading .properties and .csv resources from the classpath,
+# including per-brand subdirectories (res/jaguar, res/kia, etc.).
+-keepdirectories com/fr3ts0n/ecu/prot/obd/res
+-keepdirectories com/fr3ts0n/ecu/prot/obd/res/**
+
 # R8's default class repackaging moves classes into the root package, which
 # breaks any *relative* Class.getResource()/getResourceAsStream() call -
 # EcuDataItems.loadFromResource() does exactly this

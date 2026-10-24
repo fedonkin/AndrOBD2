@@ -21,36 +21,71 @@ package com.fr3ts0n.ecu.gui.androbd;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.widget.RelativeLayout;
 
 /**
- * Mirrored relative layout for HUD displays
- *
- * @author erwin
+ * Mirrored relative layout for windshield Head-Up Display (HUD) with live toggle & touch mapping.
  */
 public class MirrorRelativeLayout extends RelativeLayout
 {
+	private boolean mirrored = true;
+
 	public MirrorRelativeLayout(Context context)
 	{
 		super(context);
 	}
-	
+
 	public MirrorRelativeLayout(Context context, AttributeSet attrs)
 	{
 		super(context, attrs);
 	}
-	
+
 	public MirrorRelativeLayout(Context context, AttributeSet attrs, int defStyle)
 	{
 		super(context, attrs, defStyle);
 	}
-	
+
+	public boolean isMirrored()
+	{
+		return mirrored;
+	}
+
+	public void setMirrored(boolean mirrored)
+	{
+		if (this.mirrored != mirrored)
+		{
+			this.mirrored = mirrored;
+			invalidate();
+		}
+	}
+
+	@Override
+	public boolean dispatchTouchEvent(MotionEvent ev)
+	{
+		if (!mirrored || getWidth() <= 0)
+		{
+			return super.dispatchTouchEvent(ev);
+		}
+		MotionEvent flipped = MotionEvent.obtain(ev);
+		flipped.setLocation(getWidth() - ev.getX(), ev.getY());
+		boolean handled = super.dispatchTouchEvent(flipped);
+		flipped.recycle();
+		return handled;
+	}
+
 	@Override
 	protected void dispatchDraw(Canvas canvas)
 	{
-		// Scale the canvas in reverse in the x-direction, pivoting on
-		// the center of the view
-		canvas.scale(-1f, 1f, getWidth() / 2f, getHeight() / 2f);
-		super.dispatchDraw(canvas);
+		if (mirrored)
+		{
+			int save = canvas.save();
+			canvas.scale(-1f, 1f, getWidth() / 2f, getHeight() / 2f);
+			super.dispatchDraw(canvas);
+			canvas.restoreToCount(save);
+		} else
+		{
+			super.dispatchDraw(canvas);
+		}
 	}
 }

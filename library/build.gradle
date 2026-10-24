@@ -23,7 +23,7 @@ sourceSets {
         }
         resources {
             srcDirs("src/main/java")
-            include('com/fr3ts0n/ecu/prot/obd/res/*')
+            include('com/fr3ts0n/ecu/prot/obd/res/**')
         }
     }
 }

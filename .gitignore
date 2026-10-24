@@ -9,3 +9,5 @@
 **/*.iml
 *~
 local.properties
+# Local crash reports may contain private device/application data.
+/diagnostics/
