@@ -56,7 +56,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 
@@ -335,20 +334,16 @@ class ObdItemAdapter extends ArrayAdapter<Object>
     @SuppressWarnings("unchecked")
     Collection getPreferredItems(PvList pvs)
     {
-        Set<String> pidsToShow = prefs.getStringSet(SettingsActivity.KEY_DATA_ITEMS,
-                (Set<String>) pvs.keySet());
+        // Native PV keys are mixed: ObdProt seeds Integer 0 before any connection.
+        // Never use that keySet as a Set<String> preference default.
+        Set<String> pidsToShow = prefs.getStringSet(SettingsActivity.KEY_DATA_ITEMS, null);
         return getMatchingItems(pvs, pidsToShow);
     }
 
-    private Collection<Object> getMatchingItems(PvList pvs, Set<String> pidsToShow)
+    @SuppressWarnings("unchecked")
+    private Collection<Object> getMatchingItems(PvList pvs, Set<?> pidsToShow)
     {
-        HashSet<Object> filtered = new HashSet<>();
-        for (String key : pidsToShow)
-        {
-            IndexedProcessVar pv = (IndexedProcessVar) pvs.get(key);
-            if (pv != null)
-                filtered.add(pv);
-        }
+        Set<Object> filtered = PvItemSelection.select(pvs, pidsToShow);
         VehicleUiProfile activeUi = VehicleUiRegistry.getActiveUiProfile();
         String seedKey = activeUi != null ? activeUi.getSettingsSeedPrefKey() : null;
         boolean includeBrandExt = (seedKey != null

@@ -56,12 +56,32 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 	{
 		final AwesomeSpeedometer gauge;
 		final TextView tvDescr;
+		private Integer boundSpeedometerColor;
 
 		GaugeViewHolder(View itemView)
 		{
 			super(itemView);
 			gauge = itemView.findViewById(R.id.chart);
 			tvDescr = itemView.findViewById(R.id.label);
+			// AwesomeSpeedometer 1.6.1 creates a RadialGradient in setSpeedometerColor.
+			// RecyclerView binds before measurement; sizePa is still zero at that point.
+			// One holder-owned listener uses the latest binding (no stale posted colors).
+			gauge.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+					applySpeedometerColorIfSized());
+		}
+
+		void bindSpeedometerColor(int color)
+		{
+			boundSpeedometerColor = color;
+			applySpeedometerColorIfSized();
+		}
+
+		private void applySpeedometerColorIfSized()
+		{
+			if (boundSpeedometerColor != null && gauge.getSizePa() > 0)
+			{
+				gauge.setSpeedometerColor(boundSpeedometerColor);
+			}
 		}
 	}
 
@@ -152,7 +172,7 @@ class ObdGaugeAdapter extends RecyclerView.Adapter<ObdGaugeAdapter.GaugeViewHold
 		if (value == null) value = minValue;
 
 		holder.gauge.setTrianglesColor(pidColor);
-		holder.gauge.setSpeedometerColor(pidColor);
+		holder.bindSpeedometerColor(pidColor);
 		holder.gauge.getIndicator().setColor(pidColor);
 		holder.gauge.setBackgroundCircleColor(
 				ContextCompat.getColor(context, R.color.bg_surface_elevated));
