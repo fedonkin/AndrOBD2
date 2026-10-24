@@ -1,8 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="vehicle_profile_volvo_p2">Volvo XC90 I (P2) — experimental CAN PIDs</string>
-    <string name="vehicle_profile_volvo_spa">Volvo XC90 II (SPA, 2016–2021) — experimental CAN PIDs</string>
-    <string name="vehicle_profile_short_volvo_p2">XC90 I · P2 · EXP</string>
-    <string name="vehicle_profile_short_volvo_spa">XC90 II · SPA · EXP</string>
+    <string name="vehicle_profile_volvo_p2">XC90 I · year unknown · OBD only</string>
+    <string name="vehicle_profile_volvo_spa">XC90 II · year unknown · OBD only</string>
+    <string name="vehicle_profile_short_volvo_p2">XC90 I · OBD</string>
+    <string name="vehicle_profile_short_volvo_spa">XC90 II · OBD</string>
     <string name="volvo_mod_engine_obd">Engine OBD-II (not a full VIDA scan)</string>
+    <string name="volvo_variant_p2_original">XC90 I · MY2003–2006 · pre-facelift · EXP</string>
+    <string name="volvo_short_p2_original">I 03–06 · EXP</string>
+    <string name="volvo_variant_p2_facelift">XC90 I · MY2007–2011 · facelift · EXP</string>
+    <string name="volvo_short_p2_facelift">I 07–11 · EXP</string>
+    <string name="volvo_variant_p2_late">XC90 I · MY2012–2014 · late update · EXP</string>
+    <string name="volvo_short_p2_late">I 12–14 · EXP</string>
+    <string name="volvo_variant_spa_original">XC90 II · MY2016–2019 · pre-facelift · EXP</string>
+    <string name="volvo_short_spa_original">II 16–19 · EXP</string>
+    <string name="volvo_variant_spa_facelift">XC90 II · MY2020–2021 · facelift · EXP</string>
+    <string name="volvo_short_spa_facelift">II 20–21 · EXP</string>
+    <string name="volvo_variant_spa_late">XC90 II · MY2022–early 2025 · OBD only</string>
+    <string name="volvo_short_spa_late">II 22–25 · OBD</string>
+    <string name="volvo_variant_spa_second">XC90 II · MY2025.5+ · second facelift · OBD only</string>
+    <string name="volvo_short_spa_second">II 25.5+ · OBD</string>
 </resources>

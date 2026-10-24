@@ -29,14 +29,15 @@ public final class VolvoXc90Profile implements VehicleProfileHandler {
     private final Set<Integer> selected = new HashSet<Integer>();
     private VolvoXc90Profile() { }
     public boolean isEnabled() { return supportsProfileKey(profile); }
-    public boolean isP2() { return P2.equals(profile); }
+    public VolvoXc90Variant getVariant() { return VolvoXc90Variant.fromKey(profile); }
+    public boolean isP2() { return getVariant() != null && getVariant().p2; }
     @Override public String getBrandId() { return "volvo"; }
-    @Override public boolean supportsProfileKey(String key) { return P2.equals(key) || SPA.equals(key); }
+    @Override public boolean supportsProfileKey(String key) { return VolvoXc90Variant.fromKey(key) != null; }
     @Override public synchronized void activateProfile(String key, PvList pvs) {
         if (!key.equals(profile)) {
             purge(pvs);
             profile = supportsProfileKey(key) ? key : "standard";
-            definitions = isEnabled() ? VolvoXc90Pids.create(isP2()) : Collections.<VolvoXc90Pids.Definition>emptyList();
+            definitions = isEnabled() && getVariant().experimentalPids ? VolvoXc90Pids.create(isP2()) : Collections.<VolvoXc90Pids.Definition>emptyList();
             clearFixedPidSelection();
             resetSessionState();
         }

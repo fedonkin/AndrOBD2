@@ -1946,6 +1946,9 @@ public class MainActivity extends PluginManager
                     for (com.fr3ts0n.ecu.EcuCodeItem code : entry.faultCodes) {
                         report.append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE)).append(" — ")
                             .append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_DESCRIPT)).append('\n');
+                        String guidance = VehicleProfileManager.getDtcGuidance(
+                                String.valueOf(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE)));
+                        if (!guidance.isEmpty()) report.append(guidance).append('\n');
                     }
                     report.append('\n');
                 }

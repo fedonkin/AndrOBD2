@@ -518,6 +518,13 @@ period of time while the ECU recalibrates itself.
         <item>@string/vehicle_profile_jaguar_x202</item>
         <item>@string/vehicle_profile_volvo_p2</item>
         <item>@string/vehicle_profile_volvo_spa</item>
+        <item>@string/volvo_variant_p2_original</item>
+        <item>@string/volvo_variant_p2_facelift</item>
+        <item>@string/volvo_variant_p2_late</item>
+        <item>@string/volvo_variant_spa_original</item>
+        <item>@string/volvo_variant_spa_facelift</item>
+        <item>@string/volvo_variant_spa_late</item>
+        <item>@string/volvo_variant_spa_second</item>
     </string-array>
     <string-array name="vehicle_profile_values" translatable="false">
         <item>standard</item>
@@ -529,6 +536,13 @@ period of time while the ECU recalibrates itself.
         <item>jaguar_stype_x202</item>
         <item>volvo_xc90_p2</item>
         <item>volvo_xc90_spa</item>
+        <item>volvo_xc90_p2_2003_2006</item>
+        <item>volvo_xc90_p2_2007_2011</item>
+        <item>volvo_xc90_p2_2012_2014</item>
+        <item>volvo_xc90_spa_2016_2019</item>
+        <item>volvo_xc90_spa_2020_2021</item>
+        <item>volvo_xc90_spa_2022_2025</item>
+        <item>volvo_xc90_spa_2025_5</item>
     </string-array>
     <string name="vehicle_scan_module">Scan module</string>
     <string name="vehicle_scanning_fmt">Scanning %s…</string>

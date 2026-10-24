@@ -2,7 +2,7 @@
 
 ## Что добавлено
 
-В настройках подключения доступны два **раздельных** профиля:
+В настройках подключения доступны два **раздельных семейства** профилей; разбивка по версиям приведена ниже:
 
 - **Volvo XC90 I (P2)**: справочник Volvo P-кодов и три экспериментальных запроса Mode 22 для ISO-TP CAN с 29-битными адресами.
 - **Volvo XC90 II (SPA, 2016–2021)**: тот же справочный словарь P-кодов и девять экспериментальных запросов по маршруту 7E0/7E8. Годы — модельные годы из определения источника, не дата первой регистрации.
@@ -10,6 +10,40 @@
 Это начальная поддержка, **не полная диагностика VIDA**. Профили и все расширенные параметры явно помечены экспериментальными в английском и русском интерфейсе. Положительный ответ подтверждает поддержку запроса конкретным ЭБУ, но сам по себе не доказывает правильность формулы для его прошивки.
 
 Код изолирован в `vehicles/volvo` в библиотеке и UI; словари — в `res/volvo`. Другие профили не отправляют Volvo-команды и не используют эти расшифровки. Переключение между поколениями также очищает старые значения и состояния запросов.
+
+## Дорестайлинг, рестайлинги и границы поддержки (уточнение)
+
+Выбор теперь содержит отдельные ключи версий. Это группировка для ограничения
+команд по периоду, **не автоматическое определение прошивки ЭБУ**.
+
+| Версия | Экспериментальные OEM PID |
+|---|---|
+| XC90 I, MY2003–2006, дорестайлинг | 3 P2-кандидата, только при обнаруженном 29-bit ISO-TP |
+| XC90 I, MY2007–2011, рестайлинг | Те же 3 кандидата; отдельной верификации ЭБУ нет |
+| XC90 I, MY2012–2014, позднее обновление | Те же 3 кандидата, не новый доказанный протокол |
+| XC90 II, MY2016–2019, дорестайлинг | 9 SPA-кандидатов, только 7E8 |
+| XC90 II, MY2020–2021, рестайлинг | Те же 9 кандидатов в пределах периода исходного набора |
+| XC90 II, MY2022–начало MY2025 | Только стандартный OBD + справочник; OEM-запросы отключены |
+| XC90 II, MY2025.5+, второй рестайлинг | Только стандартный OBD + справочник; OEM-запросы отключены |
+| Любое поколение, год не уточнён | Только стандартный OBD + справочник; OEM-запросы отключены |
+
+Старые сохранённые ключи `volvo_xc90_p2` / `volvo_xc90_spa` сохраняются, но
+означают **неуточнённый год**: нужно явно выбрать период, чтобы разрешить
+экспериментальные запросы. Двигатель, рынок, модельный год и идентификатор ЭБУ
+ещё требуют проверки. MY2015/Classic и переходные комплектации не угадываются:
+используйте неуточнённый профиль, пока не подтверждена применимость.
+
+Рестайлинг MY2007 подтверждён заводским списком изменений (в том числе двигателя
+и АКПП для соответствующего рынка): [1](https://www.media.volvocars.com/us/en-us/media/pressreleases/3835).
+Позднее обновление P2 описано как 2012 в UK и MY2013 в Канаде — годы нельзя
+считать универсальными для всех рынков:
+[1](https://media.volvocars.com/uk/en-gb/media/pressreleases/41900),
+[3](https://www.media.volvocars.com/ca/en-ca/media/pressreleases/41659).
+Обновление SPA представлено в феврале 2019 с добавлением B-силовых установок:
+[1](https://www.media.volvocars.com/global/en-gb/media/pressreleases/248275/volvo-cars-introduces-refreshed-volvo-xc90-suv).
+Для нового обновления Volvo USA использует границу MY2025.5:
+[4](https://www.volvocars.com/us/l/updated-xc90/).
+Эти источники подтверждают обновления автомобилей, **не идентичность PID**.
 
 ## Команды Live Data
 
@@ -76,3 +110,5 @@ U16 = A×256+B, big endian. Температуры также имеют пер�
 - `VolvoXc90Checks.main`: 38 assertions passed on JVM, using actual library classes and resources. Checks cover generation/brand isolation, headers/filters, transport gates, signed/scaled temperatures, imperial conversion, short/wrong replies, retries/NRC78, fixed selections, localization and DTC overlays.
 - `VolvoXc90ProfileTest` invokes the same checks under the normal JUnit suite. Gradle/JUnit runner and Android APK/device checks have not been executed here.
 - No vehicle validation performed. Before broadening support, capture adapter type, model year, engine/ECU identifiers and raw request/response logs from the actual XC90. Do not use experimental values as a basis for replacing parts.
+
+Additional validation: `VehicleGuidanceChecks` — 56 JVM checks passed for variant policy and DTC guidance isolation. Existing Volvo checks — 38 passed after adapting tests to explicit-year keys. No APK/device verification.

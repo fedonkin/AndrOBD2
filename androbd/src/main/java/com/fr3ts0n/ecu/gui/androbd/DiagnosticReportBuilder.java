@@ -171,6 +171,8 @@ public class DiagnosticReportBuilder
                 sb.append("• ").append(code)
                         .append(" [").append(modPrefix).append(status).append("] — ")
                         .append(desc).append('\n');
+                String guidance = VehicleProfileManager.getDtcGuidance(code);
+                if (!guidance.isEmpty()) sb.append(guidance).append('\n');
             }
         }
 

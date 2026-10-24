@@ -7,6 +7,7 @@ import com.fr3ts0n.ecu.gui.androbd.vehicles.VehicleUiProfile;
 import com.fr3ts0n.ecu.prot.obd.vehicles.VehicleModule;
 import com.fr3ts0n.ecu.prot.obd.vehicles.volvo.VolvoXc90Profile;
 import java.util.Locale;
+import com.fr3ts0n.ecu.prot.obd.vehicles.volvo.VolvoXc90Variant;
 import java.util.Set;
 
 /** No Jaguar/KIA presets or unverified health conclusions are reused for Volvo. */
@@ -28,8 +29,19 @@ public final class VolvoXc90UiProfile implements VehicleUiProfile {
         return pid == 0x0C || pid == 0x05 || pid == 0x42 || pid == 0x0D || pid == 0x10 || pid == 0x0B;
     }
     @Override public String getShortProfileLabel(Context ctx) {
-        return ctx.getString(VolvoXc90Profile.INSTANCE.isP2()
-                ? R.string.vehicle_profile_short_volvo_p2 : R.string.vehicle_profile_short_volvo_spa);
+        VolvoXc90Variant v = VolvoXc90Profile.INSTANCE.getVariant();
+        if (v == null) return ctx.getString(R.string.vehicle_profile_standard);
+        switch (v) {
+            case P2_ORIGINAL: return ctx.getString(R.string.volvo_short_p2_original);
+            case P2_FACELIFT: return ctx.getString(R.string.volvo_short_p2_facelift);
+            case P2_LATE: return ctx.getString(R.string.volvo_short_p2_late);
+            case SPA_ORIGINAL: return ctx.getString(R.string.volvo_short_spa_original);
+            case SPA_FACELIFT: return ctx.getString(R.string.volvo_short_spa_facelift);
+            case SPA_LATE: return ctx.getString(R.string.volvo_short_spa_late);
+            case SPA_SECOND_FACELIFT: return ctx.getString(R.string.volvo_short_spa_second);
+            default: return ctx.getString(v.p2 ? R.string.vehicle_profile_short_volvo_p2
+                    : R.string.vehicle_profile_short_volvo_spa);
+        }
     }
     @Override public String getModuleDisplayName(Context ctx, VehicleModule module) {
         return ctx.getString(R.string.volvo_mod_engine_obd);

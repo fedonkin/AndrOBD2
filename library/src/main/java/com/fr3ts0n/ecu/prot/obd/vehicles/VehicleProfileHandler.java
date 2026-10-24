@@ -16,6 +16,9 @@ import java.util.Set;
  */
 public interface VehicleProfileHandler
 {
+    /** Optional sourced, vehicle-specific DTC guidance; never a confirmed diagnosis. */
+    default String getDtcGuidance(String code) { return ""; }
+
     /** Brand identifier key (e.g. "jaguar", "kia"). */
     String getBrandId();
 

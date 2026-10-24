@@ -242,6 +242,12 @@ public final class VehicleProfileManager
         return h != null ? h.parseModuleDtcResponse(msgService, buffer, knownCodes, tCodes) : 0;
     }
 
+    public static String getDtcGuidance(String code)
+    {
+        VehicleProfileHandler h = activeHandler;
+        return h != null ? h.getDtcGuidance(code) : "";
+    }
+
     public static boolean isSystemPassCode(String code)
     {
         VehicleProfileHandler h = activeHandler;

@@ -145,4 +145,28 @@ public class DiagnosticReportBuilderTest
             VehicleProfileManager.setProfileByKey("standard", null);
         }
     }
+    @Test
+    public void includesJaguarPossibleCausesOnlyWithMatchingProfile()
+    {
+        java.util.Locale before = java.util.Locale.getDefault();
+        com.fr3ts0n.pvs.PvList pvs = new com.fr3ts0n.pvs.PvList();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ru"));
+            VehicleProfileManager.setProfileByKey("jaguar_stype_x200", pvs);
+            ObdCodeItem code = new ObdCodeItem(0x0180, "EFT");
+            String report = DiagnosticReportBuilder.buildFaultReport(0L, 1,
+                    Collections.singletonList(code), Collections.emptyList(),
+                    Collections.emptyList(), sampleLabels());
+            assertTrue(report.contains("Возможные причины (не диагноз)"));
+            assertTrue(report.contains("L86902"));
+            VehicleProfileManager.setProfileByKey("standard", pvs);
+            report = DiagnosticReportBuilder.buildFaultReport(0L, 1,
+                    Collections.singletonList(code), Collections.emptyList(),
+                    Collections.emptyList(), sampleLabels());
+            assertTrue(!report.contains("Возможные причины"));
+        } finally {
+            VehicleProfileManager.setProfileByKey("standard", pvs);
+            java.util.Locale.setDefault(before);
+        }
+    }
 }

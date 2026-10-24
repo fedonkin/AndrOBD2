@@ -125,7 +125,11 @@ public class DfcItemAdapter extends ObdItemAdapter
 		ivIcon.setColorFilter(accentColor);
 		ivIcon.setVisibility(View.VISIBLE);
 
-		tvDescr.setText(String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT)));
+		String guidance = VehicleProfileManager.getDtcGuidance(codeText);
+		String description = String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT));
+		tvDescr.setMaxLines(Integer.MAX_VALUE);
+		tvDescr.setEllipsize(null);
+		tvDescr.setText(guidance.isEmpty() ? description : description + "\n\n" + guidance);
 		if (tvSublabel != null)
 		{
 			Object modObj = VehicleProfileManager.isCustomProfileActive()

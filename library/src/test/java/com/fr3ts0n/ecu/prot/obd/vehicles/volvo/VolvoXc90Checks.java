@@ -35,7 +35,7 @@ public final class VolvoXc90Checks {
             check(!p.isEnabled() && p.getExtendedDataItems().isEmpty(), "standard is isolated");
             check(poll(p, 0, ecus(0x7E8)).isEmpty(), "disabled emits no commands");
             check(!p.supportsProfileKey("volvo_xc90_unknown"), "exact profile keys only");
-            VehicleProfileManager.setProfileByKey(VolvoXc90Profile.P2, pvs);
+            VehicleProfileManager.setProfileByKey(VolvoXc90Variant.P2_ORIGINAL.key, pvs);
             check(VehicleProfileManager.getActiveHandler() == p, "registry activates Volvo");
             check(p.getExtendedDataItems().size() == 3, "P2 definition count");
             check(poll(p, 0, ecus(0x10)).isEmpty(), "no P2 Mode22 on K-line");
@@ -55,7 +55,7 @@ public final class VolvoXc90Checks {
             check(Math.abs(((Number) atf.pv.get(EcuDataPv.FID_VALUE)).doubleValue() + 10) < 0.01,
                     "signed P2 temperature");
             check(EcuDataItems.byMnemonic.containsKey("volvo_p2_atf_temp"), "mnemonic registered");
-            VehicleProfileManager.setProfileByKey(VolvoXc90Profile.SPA, pvs);
+            VehicleProfileManager.setProfileByKey(VolvoXc90Variant.SPA_ORIGINAL.key, pvs);
             check(pvs.isEmpty() && !EcuDataItems.byMnemonic.containsKey("volvo_p2_atf_temp"),
                     "same-brand generation change purges P2 values");
             check(p.getExtendedDataItems().size() == 9 && !p.ownsExtendedPid(0xE004), "generation DID isolation");
@@ -105,7 +105,7 @@ public final class VolvoXc90Checks {
             check(EcuCodeList.getOverlayBundleName() == null, "standard clears overlay");
             // Exercise the actual protocol 62xxxx parser, not just the handler directly.
             ObdProt protocol = new ElmProt();
-            VehicleProfileManager.setProfileByKey(VolvoXc90Profile.SPA, ObdProt.PidPvs);
+            VehicleProfileManager.setProfileByKey(VolvoXc90Variant.SPA_ORIGINAL.key, ObdProt.PidPvs);
             request(p, "7E0", "220341");
             protocol.handleTelegram("62034168".toCharArray());
             EcuDataItem parsed = p.getExtendedDataItems().get(1);
