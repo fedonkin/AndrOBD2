@@ -126,7 +126,8 @@ public class DfcItemAdapter extends ObdItemAdapter
 		ivIcon.setVisibility(View.VISIBLE);
 
 		String guidance = VehicleProfileManager.getDtcGuidance(codeText);
-		String description = String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT));
+		String description = VehicleProfileManager.getDtcDescription(codeText);
+        if (description.isEmpty()) description = String.valueOf(currPv.get(EcuCodeItem.FID_DESCRIPT));
 		tvDescr.setMaxLines(Integer.MAX_VALUE);
 		tvDescr.setEllipsize(null);
 		tvDescr.setText(guidance.isEmpty() ? description : description + "\n\n" + guidance);
@@ -136,7 +137,7 @@ public class DfcItemAdapter extends ObdItemAdapter
 					? currPv.get(VehicleProfileManager.CODE_FIELD_MODULE)
 					: null;
 			String hint = getContext().getString(VehicleProfileManager.isBrandActive("jaguar")
-                    ? R.string.jag_manual_dtc_hint : R.string.long_press_dfc_hint);
+                    ? R.string.jag_diag_dtc_hint : R.string.long_press_dfc_hint);
 			if (modObj != null && !String.valueOf(modObj).trim().isEmpty())
 			{
 				tvSublabel.setText("[" + String.valueOf(modObj).trim() + "] · " + hint);

@@ -1944,8 +1944,10 @@ public class MainActivity extends PluginManager
                         .append(entry.responseReceived ? getString(R.string.scan_response) + entry.faultCodes.size()
                                 : getString(R.string.scan_no_response)).append('\n');
                     for (com.fr3ts0n.ecu.EcuCodeItem code : entry.faultCodes) {
-                        report.append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE)).append(" — ")
-                            .append(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_DESCRIPT)).append('\n');
+                        String codeValue = String.valueOf(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE));
+                        String description = VehicleProfileManager.getDtcDescription(codeValue);
+                        if (description.isEmpty()) description = String.valueOf(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_DESCRIPT));
+                        report.append(codeValue).append(" — ").append(description).append('\n');
                         String guidance = VehicleProfileManager.getDtcGuidance(
                                 String.valueOf(code.get(com.fr3ts0n.ecu.EcuCodeItem.FID_CODE)));
                         if (!guidance.isEmpty()) report.append(guidance).append('\n');
@@ -2964,8 +2966,9 @@ public class MainActivity extends PluginManager
             return true;
         }
 
-        if (id == R.id.jaguar_manual) {
-            startActivity(new Intent(this, JaguarManualActivity.class));
+        if (id == R.id.jaguar_diagnostics) {
+            if (!VehicleProfileManager.isBrandActive("jaguar")) return true;
+            startActivity(new Intent(this, JaguarDiagnosticsActivity.class));
             return true;
         }
         if (id == R.id.open_csv_log) {
@@ -3217,6 +3220,12 @@ public class MainActivity extends PluginManager
             refreshHomeUi();
         }
 
+        if (key == null || com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarDiagnostics.YEAR_PREF.equals(key)) {
+            com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarDiagnostics.setModelYear(
+                    prefs.getString(com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarDiagnostics.YEAR_PREF, "0"));
+            if (mDfcAdapter != null) mDfcAdapter.notifyDataSetChanged();
+        }
+
         if (key == null || SettingsActivity.KEY_VEHICLE_PROFILE.equals(key))
         {
             String profVal = prefs.getString(SettingsActivity.KEY_VEHICLE_PROFILE, "standard");
@@ -3417,7 +3426,7 @@ public class MainActivity extends PluginManager
                     intent = new Intent(Intent.ACTION_WEB_SEARCH);
                     EcuCodeItem dfc = (EcuCodeItem) getListAdapter().getItem(position);
                     if (VehicleProfileManager.isBrandActive("jaguar")) {
-                        startActivity(new Intent(this, JaguarManualActivity.class).putExtra("code",
+                        startActivity(new Intent(this, JaguarDiagnosticsActivity.class).putExtra("code",
                                 String.valueOf(dfc.get(EcuCodeItem.FID_CODE))));
                         break;
                     }
@@ -3676,6 +3685,7 @@ public class MainActivity extends PluginManager
     private void updateMenuVisibility()
     {
         if (menu == null) return;
+        setMenuItemVisible(R.id.jaguar_diagnostics, VehicleProfileManager.isBrandActive("jaguar"));
 
         switch (mode)
         {

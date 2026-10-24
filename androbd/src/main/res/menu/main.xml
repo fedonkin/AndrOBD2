@@ -34,7 +34,7 @@
         </menu>
     </item>
 
-    <item android:id="@+id/jaguar_manual" android:title="@string/jag_manual_title" />
+    <item android:id="@+id/jaguar_diagnostics" android:title="@string/jag_diag_title" />
     <item android:id="@+id/open_csv_log" android:title="@string/log_viewer" />
     <item android:id="@+id/scan_all_modules" android:title="@string/scan_all" />
     <!-- Data Management Group -->

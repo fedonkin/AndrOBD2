@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="jag_manual_title">Jaguar S-TYPE · полный справочник</string>
-    <string name="jag_manual_page">Страница PDF %1$d / %2$d · +/− масштаб · прокрутка по двум осям</string>
-    <string name="jag_manual_error">Не удалось открыть страницу оригинала. Откройте справочник повторно.</string>
-    <string name="jag_manual_dtc_hint">Удерживайте: все записи документа для этого DTC</string>
-</resources>

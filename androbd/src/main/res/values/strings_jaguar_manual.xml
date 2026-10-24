@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="jag_manual_title">Jaguar S-TYPE · full manual</string>
-    <string name="jag_manual_page">PDF page %1$d / %2$d · +/− zoom · scroll both directions</string>
-    <string name="jag_manual_error">Could not render the source page. Reopen the manual.</string>
-    <string name="jag_manual_dtc_hint">Long press: all source records for this DTC</string>
-</resources>

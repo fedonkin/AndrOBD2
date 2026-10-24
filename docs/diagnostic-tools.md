@@ -46,9 +46,9 @@ read-only experimental CAN Mode 22 candidates are documented in
 [volvo-xc90.md](volvo-xc90.md). This is not full VIDA/D2/DoIP coverage;
 read the generation, transport and source-validation limits before use.
 
-## Full Jaguar document reference
+## Native Jaguar diagnostics
 
-The complete supplied 309-page STYPE.pdf is now bundled with offline full-text
-search, 1375 structured DTC records, year/system filters and original-page zoom.
-See [jaguar-dtc-guidance.md](jaguar-dtc-guidance.md) for coverage, model/VIN scope,
-language and the distinction between source information and executable diagnostics.
+The source information is now a typed native diagnostic database, not a PDF
+viewer: 1375 fault records, model-year applicability, cause/condition/default-action
+fields and technical procedures. Normal fault rows and exports use matching
+records. See [jaguar-dtc-guidance.md](jaguar-dtc-guidance.md).

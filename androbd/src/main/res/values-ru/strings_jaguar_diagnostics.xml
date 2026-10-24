@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="jag_diag_title">Диагностика Jaguar</string>
+    <string name="jag_diag_year">Модельный год Jaguar</string>
+    <string name="jag_diag_search">DTC, блок или симптом на языке исходных данных</string>
+    <string name="jag_diag_choose_year">Сначала выберите модельный год. Данные других годов не подставляются.</string>
+    <string name="jag_diag_unavailable">Для этого года данных нет. MY2003 не подставляется для более поздних машин.</string>
+    <string name="jag_diag_count">Найдено диагностических записей: %1$d</string>
+    <string name="jag_diag_scope">Возможные причины — не диагноз. Сверьте двигатель и блок. Powertrain MY2000: VIN до L86901; MY2001–2002: от L86902. Подробные исходные данные на английском.</string>
+    <string name="jag_diag_procedure_warning">Диагностическая процедура / технические сведения. Экран не отправляет команды самотестов и исполнительных механизмов. Соблюдайте указанные условия и меры безопасности.</string>
+    <string name="jag_diag_dtc_hint">Удерживайте: причины, условия и данные блока</string>
+    <string-array name="jag_diag_year_labels">
+        <item>Выберите модельный год</item>
+        <item>2000</item>
+        <item>2001</item>
+        <item>2002</item>
+        <item>2003</item>
+        <item>Другой год / нет данных</item>
+    </string-array>
+    <string-array name="jag_diag_modes">
+        <item>Диагностика неисправностей</item>
+        <item>Процедуры и технические данные</item>
+    </string-array>
+    <string-array name="jag_diag_sections">
+        <item>Все системы</item>
+        <item>Двигатель и трансмиссия</item>
+        <item>Кузов</item>
+        <item>Шасси</item>
+        <item>Сеть</item>
+        <item>Общие сведения</item>
+    </string-array>
+</resources>

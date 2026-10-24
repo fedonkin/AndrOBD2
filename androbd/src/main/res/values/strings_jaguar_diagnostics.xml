@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="jag_diag_title">Jaguar diagnostics</string>
+    <string name="jag_diag_year">Jaguar model year</string>
+    <string name="jag_diag_search">DTC, module or source-language symptom</string>
+    <string name="jag_diag_choose_year">Select the model year first. Other years are not substituted.</string>
+    <string name="jag_diag_unavailable">There are no data for this year. MY2003 is not substituted for later cars.</string>
+    <string name="jag_diag_count">Matching diagnostic entries: %1$d</string>
+    <string name="jag_diag_scope">Possible causes are not a diagnosis. Verify engine and module. Powertrain MY2000: VIN through L86901; MY2001–2002: from L86902. Detailed source text is English.</string>
+    <string name="jag_diag_procedure_warning">Diagnostic procedure/information. This screen does not send self-test or actuator commands. Follow the applicable safety and test conditions.</string>
+    <string name="jag_diag_dtc_hint">Hold: causes, conditions and module details</string>
+    <string-array name="jag_diag_year_labels">
+        <item>Choose model year</item>
+        <item>2000</item>
+        <item>2001</item>
+        <item>2002</item>
+        <item>2003</item>
+        <item>Other year / not covered</item>
+    </string-array>
+    <string-array name="jag_diag_modes">
+        <item>Fault diagnosis</item>
+        <item>Procedures and technical data</item>
+    </string-array>
+    <string-array name="jag_diag_sections">
+        <item>All systems</item>
+        <item>Powertrain</item>
+        <item>Body</item>
+        <item>Chassis</item>
+        <item>Network</item>
+        <item>General</item>
+    </string-array>
+    <string-array name="jag_diag_year_values" translatable="false"><item>0</item><item>2000</item><item>2001</item><item>2002</item><item>2003</item><item>2004</item></string-array>
+</resources>

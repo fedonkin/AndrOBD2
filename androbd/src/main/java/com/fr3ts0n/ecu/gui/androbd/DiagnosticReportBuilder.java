@@ -160,7 +160,8 @@ public class DiagnosticReportBuilder
                 Object codeObj = item.get(EcuCodeItem.FID_CODE);
                 Object descObj = item.get(EcuCodeItem.FID_DESCRIPT);
                 String code = codeObj != null ? String.valueOf(codeObj).trim() : "---";
-                String desc = descObj != null ? String.valueOf(descObj).trim() : "";
+                String desc = VehicleProfileManager.getDtcDescription(code);
+                if (desc.isEmpty()) desc = descObj != null ? String.valueOf(descObj).trim() : "";
                 String status = resolveStatusText(code, item.get(EcuCodeItem.FID_STATUS), labels);
                 Object modObj = VehicleProfileManager.isCustomProfileActive()
                         ? item.get(VehicleProfileManager.CODE_FIELD_MODULE)

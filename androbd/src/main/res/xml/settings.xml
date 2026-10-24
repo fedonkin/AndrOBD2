@@ -115,6 +115,13 @@
                 />
 
             <ListPreference
+                android:key="jaguar_diagnostic_year"
+                android:defaultValue="0"
+                android:title="@string/jag_diag_year"
+                android:entries="@array/jag_diag_year_labels"
+                android:entryValues="@array/jag_diag_year_values" />
+
+            <ListPreference
                 android:defaultValue="1"
                 android:dialogTitle="@string/select_medium"
                 android:entries="@array/empty"

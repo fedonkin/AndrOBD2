@@ -151,6 +151,7 @@ public class DiagnosticReportBuilderTest
         java.util.Locale before = java.util.Locale.getDefault();
         com.fr3ts0n.pvs.PvList pvs = new com.fr3ts0n.pvs.PvList();
         try {
+            com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarDiagnostics.setModelYear("2002");
             java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ru"));
             VehicleProfileManager.setProfileByKey("jaguar_stype_x200", pvs);
             ObdCodeItem code = new ObdCodeItem(0x0180, "EFT");
@@ -158,7 +159,7 @@ public class DiagnosticReportBuilderTest
                     Collections.singletonList(code), Collections.emptyList(),
                     Collections.emptyList(), sampleLabels());
             assertTrue(report.contains("Возможные причины — не диагноз"));
-            assertTrue(report.contains("L86902"));
+            assertTrue(report.contains("MY 2002"));
             VehicleProfileManager.setProfileByKey("standard", pvs);
             report = DiagnosticReportBuilder.buildFaultReport(0L, 1,
                     Collections.singletonList(code), Collections.emptyList(),
@@ -166,6 +167,7 @@ public class DiagnosticReportBuilderTest
             assertTrue(!report.contains("Возможные причины"));
         } finally {
             VehicleProfileManager.setProfileByKey("standard", pvs);
+            com.fr3ts0n.ecu.prot.obd.vehicles.jaguar.JaguarDiagnostics.setModelYear("0");
             java.util.Locale.setDefault(before);
         }
     }

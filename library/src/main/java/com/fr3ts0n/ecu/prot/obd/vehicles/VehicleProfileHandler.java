@@ -18,6 +18,8 @@ public interface VehicleProfileHandler
 {
     /** Optional sourced, vehicle-specific DTC guidance; never a confirmed diagnosis. */
     default String getDtcGuidance(String code) { return ""; }
+    /** Applicable native database description, or empty for the existing code dictionary. */
+    default String getDtcDescription(String code) { return ""; }
 
     /** Brand identifier key (e.g. "jaguar", "kia"). */
     String getBrandId();

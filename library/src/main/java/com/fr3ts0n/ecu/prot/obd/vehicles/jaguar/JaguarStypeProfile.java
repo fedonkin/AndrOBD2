@@ -595,17 +595,32 @@ public final class JaguarStypeProfile implements VehicleProfileHandler
     }
 
     @Override
+    public String getDtcDescription(String code)
+    {
+        if (!isEnabled()) return "";
+        Set<String> descriptions = new LinkedHashSet<String>();
+        for (JaguarDiagnostics.Record r : JaguarDiagnostics.find(code, JaguarDiagnostics.getModelYear()))
+            descriptions.add(r.module().replace('\n', ' ') + ": " + r.description());
+        StringBuilder out = new StringBuilder();
+        for (String description : descriptions) {
+            if (out.length() > 0) out.append('\n');
+            out.append(description);
+        }
+        return out.toString();
+    }
+
+    @Override
     public String getDtcGuidance(String code)
     {
         if (!isEnabled()) return "";
-        String full = JaguarManualReference.forCode(code);
-        if (full.isEmpty() || activeProfile == Profile.STYPE_X202) return full;
-        // Retain the previously reviewed EN/RU summaries, with their narrower scope.
-        String summary = Messages.getString("jag_dtc_causes_" + code.trim().toUpperCase(Locale.US), "");
-        if (summary.isEmpty()) return full;
-        return Messages.getString("jag_dtc_causes_scope") + "\n"
-                + Messages.getString("jag_dtc_causes_heading") + " " + summary + "\n"
-                + Messages.getString("jag_dtc_causes_caution") + "\n\n" + full;
+        String result = JaguarDiagnostics.guidance(code);
+        int year = JaguarDiagnostics.getModelYear();
+        if (code != null && (year == 2001 || year == 2002) && !result.isEmpty()) {
+            String summary = Messages.getString("jag_dtc_causes_" + code.trim().toUpperCase(Locale.US), "");
+            if (!summary.isEmpty()) return Messages.getString("jag_dtc_causes_heading") + " "
+                    + summary + "\n" + Messages.getString("jag_dtc_causes_caution") + "\n\n" + result;
+        }
+        return result;
     }
 
     @Override
